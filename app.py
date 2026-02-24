@@ -214,4 +214,36 @@ weeks = cal.monthdayscalendar(YEAR, selected_month)
 
 f_map = {}; s_map = {}
 for e in cur_fixed: f_map.setdefault(e.date.day, []).append(e)
-for _, r
+for _, r in m_df.iterrows(): s_map.setdefault(int(r["date"].day), []).append((r["category"], r["amount"], r["memo"]))
+
+cols = st.columns(7)
+for i, d_name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
+    cols[i].markdown(f"<div style='text-align:center;'><b>{d_name}</b></div>", unsafe_allow_html=True)
+
+for week in weeks:
+    cols = st.columns(7)
+    for i, daynum in enumerate(week):
+        if daynum == 0:
+            cols[i].markdown("<div style='height:160px; background:#f0f2f6; border-radius:8px;'></div>", unsafe_allow_html=True)
+            continue
+        
+        f_list = f_map.get(daynum, []); s_list = s_map.get(daynum, [])
+        f_sum = sum(e.amount for e in f_list); s_sum = sum(a for _, a, _ in s_list)
+        content = [f"<div style='font-weight:bold; border-bottom:1px solid #eee; margin-bottom:5px;'>{daynum}</div>"]
+        if f_list:
+            content.append(f"<div style='color:#e74c3c; font-size:11px; font-weight:bold;'>고정: {f_sum:,.0f}</div>")
+            for e in f_list: content.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item} ({e.amount:,.0f})</div>")
+        if s_list:
+            content.append(f"<div style='color:#3498db; font-size:11px; font-weight:bold; margin-top:5px;'>변동: {s_sum:,.0f}</div>")
+            for cat, amt, memo in s_list:
+                display = memo if memo else cat
+                content.append(f"<div style='color:#2980b9; font-size:10px;'>· {display} ({amt:,.0f})</div>")
+        
+        bg = "#ffffff" if not f_list else "#fff4f4"
+        cols[i].markdown(f"<div style='height:160px; border:1px solid #ddd; padding:8px; background:{bg}; border-radius:8px; overflow-y:auto;'>{''.join(content)}</div>", unsafe_allow_html=True)
+
+# 상세 내역
+st.markdown("---")
+st.subheader("📜 상세 지출 내역")
+if not m_df.empty:
+    st.dataframe(m_df.assign(date=m_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
