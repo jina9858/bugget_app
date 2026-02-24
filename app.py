@@ -91,9 +91,9 @@ def save_fixed_events(events: List[Event]):
     save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in events])
 
 # -----------------------------
-# 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
+# 2. 세션 상태 및 오늘 날짜 (2026-02-24)
 # -----------------------------
-actual_today = dt.date.today()
+actual_today = dt.date(2026, 2, 24) #
 
 if "income_data" not in st.session_state: 
     st.session_state.income_data = load_json(INCOME_FILE, {f"{YEAR}-{m:02d}": 0 for m in range(START_MONTH, END_MONTH + 1)})
@@ -188,15 +188,12 @@ for m in range(START_MONTH, selected_month):
 
 cur_inc = st.session_state.income_data.get(month_key, 0)
 period_fixed_events = [e for e in st.session_state.fixed_events if budget_start <= e.date <= budget_end]
-
-# [수정] 나간 금액 vs 남은 금액 계산 로직
 paid_fixed_sum = sum(e.amount for e in period_fixed_events if e.date <= actual_today)
 rem_fixed_sum = sum(e.amount for e in period_fixed_events if e.date > actual_today)
-
 v_period_total = int(df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
 total_balance = cur_inc - monthly_savings - (paid_fixed_sum + rem_fixed_sum) - v_period_total + monthly_carry_over + withdrawal
 
-# 달력 그리드 생성
+# [연속 달력 그리드 생성]
 date_list = []
 curr = budget_start
 while curr <= budget_end:
@@ -209,16 +206,22 @@ padding = (7 - (len(full_grid) % 7)) % 7
 full_grid += [None] * padding
 weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
-# 주간 식비
+# [핵심] 식비 주차별 균등 배분 계산
+# 설정한 기간의 달력 행(주차) 수에 맞춰 월 예산을 공평하게 나눕니다.
 weekly_food_base = food_budget_total / len(weeks)
-weekly_food_balances = {}; food_carry = 0
+weekly_food_balances = {}
+food_carry = 0
+
 for week_row in weeks:
     valid = [d for d in week_row if d is not None]
     if not valid: continue
     ws, we = valid[0], valid[-1]
+    # 해당 주차 기간 동안의 식비 지출 합산
     w_spent = int(df[(df["category"] == "식비") & (df["date"].dt.date >= ws) & (df["date"].dt.date <= we)]["amount"].sum())
+    # 공평하게 나눈 주간 예산 + 지난주 이월금
     w_available = weekly_food_base + food_carry
     w_balance = w_available - w_spent
+    # 일요일 칸(idx 6) 또는 기간 마지막 날에 잔액 배분
     target_date = week_row[6] if (len(week_row) > 6 and week_row[6]) else we
     weekly_food_balances[target_date] = w_balance
     food_carry = w_balance
@@ -226,14 +229,13 @@ for week_row in weeks:
 rem_em_in_period = em_budget_total - int(df[(df["category"] == "예비비") & (df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
 
 # -----------------------------
-# 4. 상단 대시보드 (나간 금액 / 남은 금액 강조)
+# 4. 상단 대시보드
 # -----------------------------
-st.markdown(f"### 📊 예산 기간: {budget_start.strftime('%Y/%m/%d')} ~ {budget_end.strftime('%Y/%m/%d')}")
-
+st.markdown(f"### 📊 예산 기간: {budget_start.strftime('%Y/%m/%d')} ~ {budget_end.strftime('%m/%d')}")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
-m2.metric("✅ 나간 고정비", f"{paid_fixed_sum:,.0f}원", delta_color="normal")
-m3.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원", delta_color="inverse")
+m2.metric("✅ 나간 고정비", f"{paid_fixed_sum:,.0f}원")
+m3.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원")
 m4.metric("💰 총 현금 자산", f"{st.session_state.cash_data['total_balance']:,.0f}원")
 m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원")
 
@@ -248,10 +250,8 @@ header_cols = st.columns(7)
 for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
     header_cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;'><b>{name}</b></div>", unsafe_allow_html=True)
 
-f_date_map = {}
+f_date_map = {}; s_date_map = {}
 for e in period_fixed_events: f_date_map.setdefault(e.date, []).append(e)
-
-s_date_map = {}
 period_spent_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]
 for _, r in period_spent_df.iterrows():
     s_date_map.setdefault(r["date"].date(), []).append((r["category"], r["amount"], r["memo"]))
@@ -266,12 +266,11 @@ for week in weeks:
         is_today = (current_date == actual_today)
         cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
-        # [수정] 식비 및 예비비 잔액을 오직 '일요일(idx 6)'에만 표시
-        if idx == 6:
+        # [수정] 식비 및 예비비 잔액을 오직 '일요일(idx 6)'에만 상단에 표시
+        if idx == 6 or current_date == budget_end:
             if current_date in weekly_food_balances:
                 cell_html.append(f"<div style='margin-bottom:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 식비: {weekly_food_balances[current_date]:,.0f} | 🚨 예비: {rem_em_in_period:,.0f}</div>")
 
-        # 비상금 인출 표시
         w_info = st.session_state.cash_data["monthly"].get(month_key, {})
         if w_info.get("withdrawal", 0) > 0:
             try:
@@ -290,6 +289,7 @@ for week in weeks:
                 txt = m if m else c
                 cell_html.append(f"<div style='color:#2980b9; font-size:10px;'>· {txt} ({a:,.0f})</div>")
         
+        # 오늘 날짜 연두색(#ccff00) 라운드 강조
         border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
         radius_style = "20px" if is_today else "8px"
         bg_color = "#fff4f4" if day_fixed else "#ffffff"
