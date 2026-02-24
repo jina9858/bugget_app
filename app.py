@@ -100,7 +100,7 @@ def load_fixed_events() -> List[Event]:
     return base
 
 # -----------------------------
-# 2. 세션 상태 및 오늘 날짜 (2026-02-24)
+# 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
 # -----------------------------
 actual_today = dt.date(2026, 2, 24)
 
@@ -159,19 +159,6 @@ if st.sidebar.button("💰 자산 현황 업데이트"):
     save_json(CASH_ASSETS_FILE, st.session_state.cash_data)
     st.rerun()
 
-with st.sidebar.expander("📝 수입 및 고정비 항목 수정"):
-    income_df = pd.DataFrame([{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()])
-    edited_inc = st.data_editor(income_df, use_container_width=True, hide_index=True)
-    fixed_df = pd.DataFrame([{"date": e.date.isoformat(), "item": e.item, "amount": e.amount, "category": e.category} for e in st.session_state.fixed_events])
-    edited_fixed = st.data_editor(fixed_df, use_container_width=True, num_rows="dynamic")
-    if st.button("💾 모든 변경사항 저장"):
-        st.session_state.income_data = dict(zip(edited_inc["월"], edited_inc["수입(원)"]))
-        save_json(INCOME_FILE, st.session_state.income_data)
-        new_fixed = [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"]) for r in edited_fixed.to_dict(orient="records")]
-        st.session_state.fixed_events = new_fixed
-        save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in new_fixed])
-        st.rerun()
-
 # -----------------------------
 # 3. 데이터 집계 및 계산
 # -----------------------------
@@ -190,23 +177,26 @@ rem_fixed_sum = sum(e.amount for e in period_fixed_events if e.date > actual_tod
 total_fixed = paid_fixed_sum + rem_fixed_sum
 v_period_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]
 
-# [수정] 자금 설계 진단용 가용 예산: 월수입 - 파킹 - 고정비 (+ 이월금 + 인출)
+# 현재 가용 잔액 계산: 월수입 - 파킹 - 고정비 (+ 이월금 + 인출) - 실제 지출
 total_budgetable = cur_inc - monthly_savings - total_fixed + monthly_carry_over + withdrawal
+total_balance = total_budgetable - int(v_period_df["amount"].sum())
+
+# 자금 설계 진단용 계획 총액
 total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_total
 adequacy = total_budgetable - total_planned
 
-# [수정] 현재 가용 잔액: 가용 예산 - 실제 변동 지출액
-total_balance = total_budgetable - int(v_period_df["amount"].sum())
-
-# 달력 그리드 및 항목별 정산 계산
+# 달력 그리드 생성
 date_list = []
 curr = budget_start
 while curr <= budget_end:
     date_list.append(curr); curr += dt.timedelta(days=1)
 start_weekday = budget_start.weekday()
 full_grid = [None] * start_weekday + date_list
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid + [None] * ((7 - len(full_grid) % 7) % 7)), 7)]
+padding = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
+# 주간 식비 및 정산 계산
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
 used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].sum())
@@ -214,8 +204,7 @@ used_other = int(v_period_df[v_period_df["category"] == "기타"]["amount"].sum(
 used_em = int(v_period_df[v_period_df["category"] == "예비비"]["amount"].sum())
 
 weekly_food_base = food_budget_total / len(weeks)
-weekly_balances = {}
-total_food_surplus_deficit = 0
+weekly_balances = {}; total_food_surplus_deficit = 0
 for week_row in weeks:
     valid = [d for d in week_row if d is not None]
     if not valid: continue
@@ -247,7 +236,6 @@ with st.expander("➕ 지출 추가하기", expanded=True):
             st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True); st.rerun()
 
 st.markdown(f"### 📊 자금 흐름 현황 (기간: {budget_start.strftime('%m/%d')} ~ {budget_end.strftime('%m/%d')})")
-# [수정] 총 현금 자산(파킹) 위치를 월수입 옆으로 이동
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
 m2.metric("💰 총 현금 자산 (파킹)", f"{st.session_state.cash_data['total_balance']:,.0f}원")
@@ -256,7 +244,7 @@ m4.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원")
 m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원", delta=f"+ {withdrawal:,.0f} (비상금)" if withdrawal > 0 else None)
 
 st.markdown("---")
-# 자금 설계 진단 (계획한 예산과의 비교)
+# 자금 설계 진단
 diag_color = "green" if adequacy >= 0 else "red"
 st.markdown(f"### 🚩 자금 설계 진단: <span style='color:{diag_color};'>{'적정 (여유로움)' if adequacy >= 0 else '예산 초과 (조정 필요)'}</span>", unsafe_allow_html=True)
 d1, d2, d3 = st.columns([1, 1, 2])
@@ -296,6 +284,15 @@ for week in weeks:
         is_today = (current_date == actual_today)
         cell_html = [f"<div class='cal-content'><div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
+        # [복구] 비상금 인출 표시 (빨간색 배경)
+        w_info = st.session_state.cash_data["monthly"].get(month_key, {})
+        if w_info.get("withdrawal", 0) > 0:
+            try:
+                if dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date:
+                    cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:5px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
+            except: pass
+
+        # 일요일 정산 표시 (마이너스 시 빨간색)
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_balances:
                 b = weekly_balances[current_date]
@@ -320,6 +317,7 @@ for week in weeks:
             cell_html.append(f"<div style='color:#3498db; font-size:13px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
             for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {m if m else c} ({a:,.0f})</div>")
         
+        cell_html.append("</div>")
         border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
         cols[idx].markdown(f"<div style='height:280px; border: {border_style}; padding:8px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
