@@ -13,6 +13,18 @@ st.set_page_config(page_title="예산 달력", layout="wide")
 # [추가됨] 모바일 모드용 CSS 추가 (기존 PC 스타일은 그대로 유지)
 st.markdown("""
     <style>
+        /* [추가됨] 화면 절반을 가리던 타이틀(제목) 텍스트 사이즈만 축소 */
+        h1 { font-size: 26px !important; }
+        h2 { font-size: 20px !important; }
+        h3 { font-size: 18px !important; }
+        @media screen and (max-width: 600px) {
+            h1 { font-size: 22px !important; margin-bottom: 5px !important; }
+            h2 { font-size: 18px !important; }
+            h3 { font-size: 16px !important; }
+        }
+
+        /* ---------------------------------------------------- */
+        /* 아래부터는 진아님이 작성하신 원본 100% 동일 (절대 건드리지 않음) */
         .cal-content {
             font-size: 14px !important;
             line-height: 1.4;
@@ -387,7 +399,7 @@ else:
         
         # 비상금 표시
         if has_withdrawal:
-            html_lines.append(f"<div style='background-color:#ff4b4b; color:white; padding:6px; border-radius:6px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
+            html_lines.append(f"<div style='background-color:#ff4b4b; color:white; padding:6px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
         
         # 일요일 정산 박스 (PC와 동일하게 표시)
         if current_date.weekday() == 6 or current_date == budget_end:
