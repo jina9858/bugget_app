@@ -16,12 +16,12 @@ st.markdown("""
         h1 { font-size: 26px !important; }
         
         /* [수정됨] 줄바꿈 방지를 위해 h3(자금흐름현황 등) 기본 사이즈 지정 */
-        h3 { font-size: 18px !important; }
+        h3 { font-size: 22px !important; }
         
         @media screen and (max-width: 600px) {
-            h1 { font-size: 22px !important; margin-bottom: 5px !important; }
+            h1 { font-size: 18px !important; margin-bottom: 5px !important; }
             /* [수정됨] 모바일 화면일 때만 h3(자금흐름현황, 자금설계진단, 항목별예산) 사이즈를 대폭 줄여 한 줄에 들어오게 함 */
-            h3 { font-size: 15px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+            h3 { font-size: 18px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
         }
 
         /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
