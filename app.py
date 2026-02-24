@@ -30,7 +30,7 @@ st.markdown("""
             line-height: 1.4;
         }
         [data-testid="stMetricValue"] {
-            font-size: 22px !important;
+            font-size: 18px !important;
         }
         
         /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
