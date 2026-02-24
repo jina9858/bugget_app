@@ -51,6 +51,7 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
     events: List[Event] = []
     feb_cutoff = dt.date(YEAR, 2, 22)
     for m in range(start_month, end_month + 1):
+        # 기본 고정비 목록
         events += [
             Event(dt.date(year, m, 5),  "생활/구독", "금천누리복지 후원", 50000),
             Event(dt.date(year, m, 9),  "통신",     "LGU+ 휴대폰",      19220),
@@ -67,12 +68,15 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
             Event(dt.date(year, m, 25), "보험",     "카카오페이 운전자보험", 8800),
             Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",       32830),
         ]
+        # 날짜별 보험
         for dday in [5, 10, 15, 20, 25, 30]:
             try: events.append(Event(dt.date(year, m, dday), "보험", "메리츠 운전자보험", 10280))
             except: pass
+        # 추가 구독 서비스
         if m >= 3:
             events.append(Event(dt.date(year, m, 13), "생활/구독", "네이버 멤버십", 4900))
             events.append(Event(dt.date(year, m, 24), "생활/구독", "AI 구독",      30000))
+        # 월말 관리비
         try:
             ld_val = calendar.monthrange(year, m)[1]
             events.append(Event(next_monday_if_weekend(dt.date(year, m, ld_val)), "주거/공과금", "관리비", 110000))
@@ -105,11 +109,12 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
-# ---------- Sidebar ----------
+# ---------- Sidebar (기간 및 자산 설정) ----------
 st.sidebar.header("⚙️ 예산 기간 설정")
 selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
 month_key = f"{YEAR}-{selected_month:02d}"
 
+# 에러 방지용 기간 데이터 로드
 saved_val = st.session_state.ref_dates.get(month_key)
 if isinstance(saved_val, dict) and "start" in saved_val: saved_dates = saved_val
 else: saved_dates = {"start": f"{YEAR}-{selected_month:02d}-01", "end": f"{YEAR}-{selected_month:02d}-24"}
@@ -156,7 +161,7 @@ with st.sidebar.expander("📝 수입 및 고정비 항목 수정", expanded=Fal
         save_fixed_events(new_fixed)
         st.rerun()
 
-# ---------- Main ----------
+# ---------- Main (종합 현황 및 입력) ----------
 st.title(f"📅 {selected_month}월 예산 달력")
 
 with st.expander("➕ 지출 추가하기", expanded=True):
@@ -187,7 +192,7 @@ f_period_total = sum(e.amount for e in st.session_state.fixed_events if budget_s
 v_period_total = int(df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
 total_balance = cur_inc - monthly_savings - f_period_total - v_period_total + monthly_carry_over + withdrawal
 
-# [핵심] 연속 달력 그리드 생성 로직
+# [연속 달력 그리드 생성]
 date_list = []
 curr = budget_start
 while curr <= budget_end:
@@ -196,9 +201,14 @@ while curr <= budget_end:
 
 start_weekday = budget_start.weekday() # 월=0, 일=6
 full_grid = [None] * start_weekday + date_list
+
+# IndexError 방지를 위해 7의 배수로 그리드 패딩 추가
+padding_needed = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding_needed
+
 weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
-# 주간 식비 계산 (연속 달력의 행 기준)
+# 주간 식비 계산
 weekly_food_base = food_budget_total / len(weeks)
 weekly_food_balances = {}; food_carry = 0
 for week_row in weeks:
@@ -208,17 +218,17 @@ for week_row in weeks:
     w_spent = int(df[(df["category"] == "식비") & (df["date"].dt.date >= ws) & (df["date"].dt.date <= we)]["amount"].sum())
     w_available = weekly_food_base + food_carry
     w_balance = w_available - w_spent
-    # 해당 주의 일요일(idx 6) 또는 기간 마지막 날에 잔액 매핑
-    target_date = week_row[6] if week_row[6] else we
+    # 인덱스 에러 방지 처리된 일요일 잔액 매핑
+    target_date = week_row[6] if (len(week_row) > 6 and week_row[6]) else we
     weekly_food_balances[target_date] = w_balance
     food_carry = w_balance
 
 rem_em_in_period = em_budget_total - int(df[(df["category"] == "예비비") & (df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
 
 # -----------------------------
-# 4. 상단 대시보드
+# 4. 상단 대시보드 출력
 # -----------------------------
-st.markdown(f"### 📊 예산 기간: {budget_start.strftime('%Y/%m/%d')} ~ {budget_end.strftime('%Y/%m/%d')}")
+st.markdown(f"### 📊 예산 기간: {budget_start.strftime('%Y/%m/%d')} ~ {budget_end.strftime('%m/%d')}")
 if withdrawal > 0:
     st.error(f"🚨 비상금 인출 발생!! {withdrawal_date.strftime('%m/%d')}에 파킹 자산에서 {withdrawal:,.0f}원을 인출하였습니다.")
 
@@ -238,7 +248,7 @@ header_cols = st.columns(7)
 for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
     header_cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;'><b>{name}</b></div>", unsafe_allow_html=True)
 
-# 데이터 매핑
+# 지출 데이터 매핑
 f_date_map = {}
 for e in st.session_state.fixed_events:
     if budget_start <= e.date <= budget_end:
@@ -249,6 +259,7 @@ period_spent_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date 
 for _, r in period_spent_df.iterrows():
     s_date_map.setdefault(r["date"].date(), []).append((r["category"], r["amount"], r["memo"]))
 
+# 달력 렌더링
 for week in weeks:
     cols = st.columns(7)
     for idx, current_date in enumerate(week):
@@ -258,7 +269,7 @@ for week in weeks:
         
         cell_html = [f"<div style='font-weight:bold; color:#2ecc71;'>{current_date.month}/{current_date.day}</div>"]
         
-        # [상단] 일요일 잔액 표시
+        # [상단] 일요일/기간종료일 잔액 표시
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_food_balances:
                 w_bal = weekly_food_balances[current_date]
@@ -272,7 +283,7 @@ for week in weeks:
                     cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:5px; border-radius:5px; font-weight:bold; text-align:center; font-size:11px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
             except: pass
 
-        # 내역 표시
+        # 내역 상세
         day_fixed = f_date_map.get(current_date, [])
         day_spent = s_date_map.get(current_date, [])
         if day_fixed:
@@ -287,7 +298,9 @@ for week in weeks:
         bg_color = "#fff4f4" if day_fixed else "#ffffff"
         cols[idx].markdown(f"<div style='height:200px; border: 2px solid #2ecc71; padding:8px; background:{bg_color}; border-radius:8px; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
-# 상세 내역
+# -----------------------------
+# 6. 상세 지출 내역 및 삭제
+# -----------------------------
 st.markdown("---")
 st.subheader("📜 기간 상세 지출 내역")
 if not period_spent_df.empty:
@@ -297,3 +310,5 @@ if not period_spent_df.empty:
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
             st.rerun()
+else:
+    st.info("해당 기간의 지출 내역이 없습니다.")
