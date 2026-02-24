@@ -7,20 +7,63 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
-# 0. 페이지 기본 설정 및 [달력 전용 글씨 최적화 CSS]
+# 0. 페이지 기본 설정
 st.set_page_config(page_title="예산 달력", layout="wide")
 
-st.markdown("""
-    <style>
-        .cal-content {
-            font-size: 14px !important;
-            line-height: 1.4;
-        }
-        [data-testid="stMetricValue"] {
-            font-size: 22px !important;
-        }
-    </style>
-    """, unsafe_allow_html=True)
+# ---------- Sidebar (화면 모드 선택 추가) ----------
+st.sidebar.header("📱 디스플레이 설정")
+view_mode = st.sidebar.radio("화면 모드 선택", ["PC 모드", "모바일 모드"], index=0)
+
+# 화면 모드에 따른 동적 CSS 적용
+if view_mode == "모바일 모드":
+    # Z플립 6 등 모바일 세로 모드 최적화 (가로 7칸 강제 유지)
+    st.markdown("""
+        <style>
+            /* 모바일에서 컬럼이 아래로 떨어지지 않게 강제 가로 배치 */
+            [data-testid="column"] {
+                min-width: calc(14.28% - 2px) !important;
+                flex: 1 1 calc(14.28% - 2px) !important;
+                padding: 0px !important;
+                margin: 0px !important;
+            }
+            /* 모바일 전용 폰트 크기 대폭 축소 */
+            .cal-content {
+                font-size: 8px !important;
+                line-height: 1.1 !important;
+            }
+            .day-label {
+                font-size: 9px !important;
+            }
+            .balance-box {
+                font-size: 7px !important;
+                padding: 2px !important;
+            }
+            [data-testid="stMetricValue"] {
+                font-size: 14px !important;
+            }
+            [data-testid="stMetricLabel"] {
+                font-size: 10px !important;
+            }
+            h1, h2, h3 {
+                font-size: 18px !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+    cell_height = "160px" # 모바일 칸 높이
+else:
+    # 기존 PC 모드 스타일
+    st.markdown("""
+        <style>
+            .cal-content {
+                font-size: 14px !important;
+                line-height: 1.4;
+            }
+            [data-testid="stMetricValue"] {
+                font-size: 22px !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+    cell_height = "280px" # PC 칸 높이
 
 # --- 전역 설정값 ---
 YEAR = 2026
@@ -116,7 +159,8 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
-# ---------- Sidebar ----------
+# ---------- Sidebar (계속) ----------
+st.sidebar.markdown("---")
 st.sidebar.header("⚙️ 예산 설정")
 st.sidebar.info(f"✨ 실제 오늘: {actual_today.strftime('%Y-%m-%d')}")
 
@@ -157,7 +201,6 @@ if st.sidebar.button("💰 자산 현황 업데이트"):
     st.session_state.cash_data["monthly"][month_key] = {"savings": monthly_savings, "withdrawal": withdrawal, "withdrawal_date": withdrawal_date.isoformat()}
     save_json(CASH_ASSETS_FILE, st.session_state.cash_data); st.rerun()
 
-# [복구] 수입 및 고정비 수정 섹션
 with st.sidebar.expander("📝 수입 및 고정비 항목 수정"):
     income_df = pd.DataFrame([{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()])
     edited_inc = st.data_editor(income_df, use_container_width=True, hide_index=True)
@@ -193,11 +236,12 @@ total_budgetable = cur_inc - monthly_savings - total_fixed + monthly_carry_over 
 initial_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_input
 surplus = total_budgetable - initial_planned
 em_budget_total = em_budget_input + (surplus if surplus > 0 else 0)
+
 total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_total
 adequacy = total_budgetable - total_planned
 total_balance = total_budgetable - int(v_period_df["amount"].sum())
 
-# 달력 그리드 및 항목별 정산
+# 달력 그리드 생성
 date_list = []
 curr = budget_start
 while curr <= budget_end:
@@ -236,7 +280,7 @@ total_remaining_budget = total_food_surplus_deficit + (hh_budget_total - used_hh
 # ---------- Main (대시보드) ----------
 st.title(f"📅 {selected_month}월 예산 달력")
 
-with st.expander("➕ 지출 추가하기", expanded=True):
+with st.expander("➕ 지출 추가하기", expanded=(view_mode == "PC 모드")):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
     with c1: d = st.date_input("날짜", value=budget_start)
     with c2: cat = st.selectbox("분류", ["식비", "생활용품", "교통/차량", "기타", "예비비"])
@@ -250,39 +294,35 @@ with st.expander("➕ 지출 추가하기", expanded=True):
 st.markdown(f"### 📊 자금 흐름 현황 (기간: {budget_start.strftime('%m/%d')} ~ {budget_end.strftime('%m/%d')})")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
-m2.metric("💰 총 현금 자산 (파킹)", f"{st.session_state.cash_data['total_balance']:,.0f}원", delta=f"- {withdrawal:,.0f} (비상금)" if withdrawal > 0 else None, delta_color="normal")
+m2.metric("💰 총 현금 자산", f"{st.session_state.cash_data['total_balance']:,.0f}원", delta=f"- {withdrawal:,.0f}" if withdrawal > 0 else None, delta_color="normal")
 m3.metric("✅ 나간 고정비", f"{paid_fixed_sum:,.0f}원")
 m4.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원")
-m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원", delta=f"+ {withdrawal:,.0f} (비상금)" if withdrawal > 0 else None)
+m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원", delta=f"+ {withdrawal:,.0f}" if withdrawal > 0 else None)
 
 st.markdown("---")
 diag_color = "green" if adequacy >= 0 else "red"
-st.markdown(f"### 🚩 자금 설계 진단: <span style='color:{diag_color};'>{'적정 (여유로움)' if adequacy >= 0 else '예산 초과 (조정 필요)'}</span>", unsafe_allow_html=True)
-d1, d2, d3 = st.columns([1, 1, 2])
-d1.write(f"💵 실제 가용 예산: **{total_budgetable:,.0f}원** (수입-저축-고정비)")
-d2.write(f"📝 계획한 예산 총합: **{total_planned:,.0f}원**")
-result_text = f"💡 결과: 현재 계획상 **{abs(adequacy):,.0f}원**이 부족합니다." if adequacy < 0 else f"💡 결과: 남는 자금 **{surplus:,.0f}원**을 예비비에 자동 할당하여 아구를 맞췄습니다."
+st.markdown(f"### 🚩 자금 설계 진단: <span style='color:{diag_color};'>{'적정' if adequacy >= 0 else '예산 초과'}</span>", unsafe_allow_html=True)
+result_text = f"💡 남은 자금 **{surplus:,.0f}원**을 예비비에 자동 할당했습니다." if adequacy >= 0 else f"💡 **{abs(adequacy):,.0f}원** 부족합니다."
 st.info(result_text)
 
 st.markdown("---")
 st.markdown("### 🎯 항목별 예산 및 정산 현황")
-b1, b2, b3, b4, b5, b6 = st.columns(6)
-b1.metric("🍔 식비 예산", f"{food_budget_total:,.0f}원", delta=f"{total_food_surplus_deficit:,.0f}원 (정산)")
-b2.metric("🧺 생활용품", f"{hh_budget_total:,.0f}원", delta=f"{(hh_budget_total - used_hh):,.0f}원 (정산)")
-b3.metric("🚗 차량/교통", f"{tr_budget_total:,.0f}원", delta=f"{(tr_budget_total - used_tr):,.0f}원 (정산)")
-b4.metric("➕ 기타 예산", f"{other_budget_total:,.0f}원", delta=f"{(other_budget_total - used_other):,.0f}원 (정산)")
-b5.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{(em_budget_total - used_em):,.0f}원 (정산)")
-b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", delta="정산 총합", delta_color="off")
+b_cols = st.columns(6)
+b_cols[0].metric("🍔 식비", f"{food_budget_total:,.0f}", delta=f"{total_food_surplus_deficit:,.0f}")
+b_cols[1].metric("🧺 생활", f"{hh_budget_total:,.0f}", delta=f"{(hh_budget_total - used_hh):,.0f}")
+b_cols[2].metric("🚗 교통", f"{tr_budget_total:,.0f}", delta=f"{(tr_budget_total - used_tr):,.0f}")
+b_cols[3].metric("➕ 기타", f"{other_budget_total:,.0f}", delta=f"{(other_budget_total - used_other):,.0f}")
+b_cols[4].metric("🚨 예비", f"{em_budget_total:,.0f}", delta=f"{(em_budget_total - used_em):,.0f}")
+b_cols[5].metric("✅ 총남음", f"{total_remaining_budget:,.0f}")
 
 # -----------------------------
 # 5. 지출 달력
 # -----------------------------
 st.markdown("---")
 st.subheader("🗓️ 지출 달력")
-st.caption(f"📍 오늘은 {actual_today.strftime('%m월 %d일')}입니다. 연두색 테두리로 표시됩니다.")
 header_cols = st.columns(7)
 for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
-    header_cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;'><b>{name}</b></div>", unsafe_allow_html=True)
+    header_cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;' class='day-label'><b>{name}</b></div>", unsafe_allow_html=True)
 
 f_date_map = {}; s_date_map = {}
 for e in period_fixed_events: f_date_map.setdefault(e.date, []).append(e)
@@ -292,39 +332,37 @@ for week in weeks:
     cols = st.columns(7)
     for idx, current_date in enumerate(week):
         if current_date is None:
-            cols[idx].markdown("<div style='height:280px; background:#f9f9f9; border:1px solid #eee; border-radius:8px;'></div>", unsafe_allow_html=True); continue
+            cols[idx].markdown(f"<div style='height:{cell_height}; background:#f9f9f9; border:1px solid #eee; border-radius:8px;'></div>", unsafe_allow_html=True); continue
         is_today = (current_date == actual_today)
-        cell_html = [f"<div class='cal-content'><div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
+        cell_html = [f"<div class='cal-content'><div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day}</div>"]
         
         w_info = st.session_state.cash_data["monthly"].get(month_key, {})
         if w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date:
-            cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:5px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
+            cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:2px; border-radius:5px; font-weight:bold; text-align:center; margin-bottom:5px;' class='balance-box'>💸 비상금 인출: {w_info['withdrawal']:,.0f}</div>")
 
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_balances:
                 b = weekly_balances[current_date]
                 def get_color(val): return "#e74c3c" if val < 0 else "#27ae60"
                 cell_html.append(f"""
-                <div style='margin-bottom:10px; padding:5px; background:#f1f9f4; border-radius:4px; font-size:12px; font-weight:bold; line-height:1.4;'>
-                    <span style='color:{get_color(b['food'])};'>🍞 주간 식비: {b['food']:,.0f}</span><br>
-                    <span style='color:{get_color(b['hh'])};'>🧺 생활용품: {b['hh']:,.0f}</span><br>
-                    <span style='color:{get_color(b['tr'])};'>🚗 차량/교통: {b['tr']:,.0f}</span><br>
-                    <span style='color:{get_color(b['other'])};'>➕ 기타: {b['other']:,.0f}</span>
+                <div style='margin-bottom:5px; padding:3px; background:#f1f9f4; border-radius:4px; font-weight:bold;' class='balance-box'>
+                    <span style='color:{get_color(b['food'])};'>🍞 식비: {b['food']:,.0f}</span><br>
+                    <span style='color:{get_color(b['hh'])};'>🧺 생활: {b['hh']:,.0f}</span>
                 </div>
-                <div style='padding:5px; background:#fff3cd; border-radius:4px; font-size:12px; font-weight:bold; border: 1px solid #ffeeba;'>
-                    <span style='color:{get_color(b['em'])};'>🚨 예비비: {b['em']:,.0f}</span>
+                <div style='padding:3px; background:#fff3cd; border-radius:4px; font-weight:bold; border: 1px solid #ffeeba;' class='balance-box'>
+                    <span style='color:{get_color(b['em'])};'>🚨 예비: {b['em']:,.0f}</span>
                 </div>
                 """)
 
         day_fixed = f_date_map.get(current_date, []); day_spent = s_date_map.get(current_date, [])
         if day_fixed:
-            cell_html.append(f"<div style='color:#e74c3c; font-size:13px; font-weight:bold;'>고정: {sum(e.amount for e in day_fixed):,.0f}</div>")
-            for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:11px;'>· {e.item} ({e.amount:,.0f})</div>")
+            cell_html.append(f"<div style='color:#e74c3c; font-weight:bold;'>고정: {sum(e.amount for e in day_fixed):,.0f}</div>")
+            if view_mode == "PC 모드": # PC 모드에서만 상세 항목 표시
+                for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:11px;'>· {e.item}</div>")
         if day_spent:
-            cell_html.append(f"<div style='color:#3498db; font-size:13px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
-            for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {m if m else c} ({a:,.0f})</div>")
+            cell_html.append(f"<div style='color:#3498db; font-weight:bold;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
         
-        cols[idx].markdown(f"<div style='height:280px; border: {'4px solid #ccff00' if is_today else '1px solid #ddd'}; padding:8px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
+        cols[idx].markdown(f"<div style='height:{cell_height}; border: {'4px solid #ccff00' if is_today else '1px solid #ddd'}; padding:5px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
 # -----------------------------
 # 6. 상세 지출 내역 및 삭제 기능
