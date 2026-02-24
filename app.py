@@ -180,14 +180,16 @@ total_balance = total_budgetable - int(v_period_df["amount"].sum())
 total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_total
 adequacy = total_budgetable - total_planned
 
-# 달력 그리드 및 주간 식비 정산
+# 달력 그리드 생성
 date_list = []
 curr = budget_start
 while curr <= budget_end:
     date_list.append(curr); curr += dt.timedelta(days=1)
 start_weekday = budget_start.weekday()
 full_grid = [None] * start_weekday + date_list
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid + [None] * ((7 - len(full_grid) % 7) % 7)), 7)]
+padding = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
@@ -213,7 +215,6 @@ for week_row in weeks:
         "em": em_budget_total - int(cum_spent_df[cum_spent_df["category"] == "예비비"]["amount"].sum())
     }
 
-# 항목별 현재 남은 총 금액 계산
 total_remaining_budget = total_food_surplus_deficit + (hh_budget_total - used_hh) + (tr_budget_total - used_tr) + (other_budget_total - used_other) + (em_budget_total - used_em)
 
 # ---------- Main (대시보드) ----------
@@ -239,7 +240,6 @@ m4.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원")
 m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원", delta=f"+ {withdrawal:,.0f} (비상금)" if withdrawal > 0 else None)
 
 st.markdown("---")
-# 자금 설계 진단
 diag_color = "green" if adequacy >= 0 else "red"
 st.markdown(f"### 🚩 자금 설계 진단: <span style='color:{diag_color};'>{'적정 (여유로움)' if adequacy >= 0 else '예산 초과 (조정 필요)'}</span>", unsafe_allow_html=True)
 d1, d2, d3 = st.columns([1, 1, 2])
@@ -248,7 +248,6 @@ d2.write(f"📝 계획한 예산 총합: **{total_planned:,.0f}원**")
 d3.info(f"💡 결과: 현재 계획상 **{abs(adequacy):,.0f}원**이 {'남습니다' if adequacy >= 0 else '부족합니다'}.")
 
 st.markdown("---")
-# [수정] 항목별 예산 및 정산 현황 (총합 메트릭 추가)
 st.markdown("### 🎯 항목별 예산 및 정산 현황")
 b1, b2, b3, b4, b5, b6 = st.columns(6)
 b1.metric("🍔 식비 예산", f"{food_budget_total:,.0f}원", delta=f"{total_food_surplus_deficit:,.0f}원 (정산)")
@@ -256,7 +255,6 @@ b2.metric("🧺 생활용품", f"{hh_budget_total:,.0f}원", delta=f"{(hh_budget
 b3.metric("🚗 차량/교통", f"{tr_budget_total:,.0f}원", delta=f"{(tr_budget_total - used_tr):,.0f}원 (정산)")
 b4.metric("➕ 기타 예산", f"{other_budget_total:,.0f}원", delta=f"{(other_budget_total - used_other):,.0f}원 (정산)")
 b5.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{(em_budget_total - used_em):,.0f}원 (정산)")
-# [추가] 정산 총합 표시
 b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", delta="정산 총합", delta_color="off")
 
 # -----------------------------
@@ -307,14 +305,24 @@ for week in weeks:
             for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:11px;'>· {e.item} ({e.amount:,.0f})</div>")
         if day_spent:
             cell_html.append(f"<div style='color:#3498db; font-size:13px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
-            for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:11px;'>· {m if m else c} ({a:,.0f})</div>")
+            for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {m if m else c} ({a:,.0f})</div>")
         
         cols[idx].markdown(f"<div style='height:280px; border: {'4px solid #ccff00' if is_today else '1px solid #ddd'}; padding:8px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
 # -----------------------------
-# 6. 상세 지출 내역 관리
+# 6. 상세 지출 내역 및 [복구] 삭제 기능
 # -----------------------------
 st.markdown("---")
 st.subheader("📜 기간 상세 지출 내역")
 if not v_period_df.empty:
     st.data_editor(v_period_df.assign(date=v_period_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
+    
+    # [복구된 삭제 기능]
+    with st.expander("🗑️ 지출 항목 삭제", expanded=False):
+        to_del = st.multiselect("삭제할 항목 선택", options=list(v_period_df.index), 
+                                format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
+        if st.button("선택한 항목 삭제"):
+            st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
+            st.rerun()
+else:
+    st.info("해당 기간의 지출 내역이 없습니다.")
