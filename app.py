@@ -1,4 +1,4 @@
-Import streamlit as st
+import streamlit as st
 import pandas as pd
 import calendar
 import datetime as dt
@@ -10,21 +10,15 @@ from typing import List, Dict, Tuple
 # 0. 페이지 기본 설정 및 [달력 전용 글씨 최적화 CSS]
 st.set_page_config(page_title="예산 달력", layout="wide")
 
-# [추가됨] 모바일 모드용 CSS 추가 (기존 PC 스타일은 그대로 유지)
 st.markdown("""
     <style>
-        /* [추가됨] 화면 절반을 가리던 타이틀(제목) 텍스트 사이즈만 축소 */
+        /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
         h1 { font-size: 26px !important; }
-        h2 { font-size: 20px !important; }
-        h3 { font-size: 18px !important; }
         @media screen and (max-width: 600px) {
             h1 { font-size: 22px !important; margin-bottom: 5px !important; }
-            h2 { font-size: 18px !important; }
-            h3 { font-size: 16px !important; }
         }
 
-        /* ---------------------------------------------------- */
-        /* 아래부터는 진아님이 작성하신 원본 100% 동일 (절대 건드리지 않음) */
+        /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
         .cal-content {
             font-size: 14px !important;
             line-height: 1.4;
@@ -144,7 +138,6 @@ if "df" not in st.session_state:
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
 # ---------- Sidebar ----------
-# [추가됨] 화면 모드 선택 라디오 버튼 추가
 st.sidebar.header("📱 디스플레이 설정")
 view_mode = st.sidebar.radio("화면 모드 선택", ["PC 모드 (달력형)", "모바일 모드 (세로형)"], index=0)
 st.sidebar.markdown("---")
@@ -267,17 +260,6 @@ total_remaining_budget = total_food_surplus_deficit + (hh_budget_total - used_hh
 # ---------- Main (대시보드) ----------
 st.title(f"📅 {selected_month}월 예산 달력")
 
-with st.expander("➕ 지출 추가하기", expanded=True):
-    c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
-    with c1: d = st.date_input("날짜", value=budget_start)
-    with c2: cat = st.selectbox("분류", ["식비", "생활용품", "교통/차량", "기타", "예비비"])
-    with c3: memo = st.text_input("내용")
-    with c4: amt = st.number_input("금액(원)", min_value=0, step=1000)
-    if st.button("지출 추가"):
-        if amt > 0:
-            new_row = pd.DataFrame([{"date": pd.to_datetime(d), "category": cat, "memo": memo, "amount": int(amt)}])
-            st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True); st.rerun()
-
 st.markdown(f"### 📊 자금 흐름 현황 (기간: {budget_start.strftime('%m/%d')} ~ {budget_end.strftime('%m/%d')})")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
@@ -309,6 +291,18 @@ b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", d
 # 5. 지출 달력 (모드 분기 처리)
 # -----------------------------
 st.markdown("---")
+
+# [요청 반영: 위치 이동] 지출 추가하기 박스를 달력 바로 위로 옮겼습니다.
+with st.expander("➕ 지출 추가하기", expanded=True):
+    c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
+    with c1: d = st.date_input("날짜", value=budget_start)
+    with c2: cat = st.selectbox("분류", ["식비", "생활용품", "교통/차량", "기타", "예비비"])
+    with c3: memo = st.text_input("내용")
+    with c4: amt = st.number_input("금액(원)", min_value=0, step=1000)
+    if st.button("지출 추가"):
+        if amt > 0:
+            new_row = pd.DataFrame([{"date": pd.to_datetime(d), "category": cat, "memo": memo, "amount": int(amt)}])
+            st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True); st.rerun()
 
 # 공통 매핑 데이터 생성 (기존 코드에서 활용)
 f_date_map = {}; s_date_map = {}
@@ -428,7 +422,8 @@ else:
         if day_spent:
             html_lines.append(f"<div style='color:#3498db; font-size:14px; font-weight:bold; margin-top:8px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
             for c, a, m in day_spent:
-                html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m if m else c} ({a:,.0f}원)</div>")
+                m_txt = m if m else c
+                html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m_txt} ({a:,.0f}원)</div>")
         
         # 내용이 아예 없는 날의 표시
         if not day_fixed and not day_spent and not has_withdrawal and not (current_date.weekday() == 6 or current_date == budget_end):
