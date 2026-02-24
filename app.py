@@ -21,10 +21,10 @@ st.markdown("""
         h1 { font-size: 22px !important; }
         
         /* 줄바꿈 방지를 위해 3개 타이틀(h3) 기본 사이즈 지정 */
-        h3 { font-size: 18px !important; }
+        h3 { font-size: 20px !important; }
 
         @media screen and (max-width: 600px) {
-            h1 { font-size: 18px !important; margin-bottom: 5px !important; }
+            h1 { font-size: 20px !important; margin-bottom: 5px !important; }
             /* 모바일 화면일 때만 3개 타이틀(h3) 사이즈를 14px로 줄이고 자간을 좁혀 한 줄에 쏙 들어가게 함 */
             h3 { font-size: 14px !important; letter-spacing: -0.5px !important; }
         }
@@ -35,7 +35,7 @@ st.markdown("""
             line-height: 1.4;
         }
         [data-testid="stMetricValue"] {
-            font-size: 16px !important;
+            font-size: 14px !important;
         }
         
         /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
