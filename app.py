@@ -107,7 +107,7 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
-# ---------- Sidebar (항목별 예산 설정) ----------
+# ---------- Sidebar ----------
 st.sidebar.header("⚙️ 예산 설정")
 st.sidebar.info(f"✨ 실제 오늘: {actual_today.strftime('%Y-%m-%d')}")
 
@@ -127,7 +127,6 @@ if budget_start.isoformat() != saved_dates.get("start") or budget_end.isoformat(
     st.rerun()
 
 st.sidebar.markdown("---")
-# [사용자 요청] 4가지 세부 예산 입력
 food_budget_total = st.sidebar.number_input("🍔 월 식비 총 예산", min_value=0, value=650000, step=10000)
 household_budget_total = st.sidebar.number_input("🧺 월 생활용품 예산", min_value=0, value=100000, step=10000)
 transport_budget_total = st.sidebar.number_input("🚗 월 차량/교통 예산", min_value=0, value=150000, step=10000)
@@ -209,21 +208,22 @@ padding = (7 - (len(full_grid) % 7)) % 7
 full_grid += [None] * padding
 weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
-# [핵심] 항목별 잔액 계산 로직
+# [수정] 식비 및 기타 예산 잔액 계산 (이월 없음)
 weekly_food_base = food_budget_total / len(weeks)
 weekly_food_balances = {}
-food_carry = 0
+total_food_surplus_deficit = 0
 
 for week_row in weeks:
     valid = [d for d in week_row if d is not None]
     if not valid: continue
     ws, we = valid[0], valid[-1]
     
-    # 해당 주차 식비 지출
+    # 해당 주차 식비 지출 및 잔액 (독립적 관리)
     w_food_spent = int(v_period_df[(v_period_df["category"] == "식비") & (v_period_df["date"].dt.date >= ws) & (v_period_df["date"].dt.date <= we)]["amount"].sum())
-    w_food_bal = (weekly_food_base + food_carry) - w_food_spent
+    w_food_bal = weekly_food_base - w_food_spent
+    total_food_surplus_deficit += w_food_bal # 대시보드 표시용 합산
     
-    # 주차별 누적 지출 (생활용품, 교통, 예비비)
+    # 주차별 누적 지출 (기타 항목은 월 단위)
     cum_spent_df = v_period_df[v_period_df["date"].dt.date <= we]
     rem_hh = household_budget_total - int(cum_spent_df[cum_spent_df["category"] == "생활용품"]["amount"].sum())
     rem_tr = transport_budget_total - int(cum_spent_df[cum_spent_df["category"] == "교통/차량"]["amount"].sum())
@@ -236,12 +236,11 @@ for week_row in weeks:
         "transport": rem_tr,
         "reserve": rem_em
     }
-    food_carry = w_food_bal
 
 # -----------------------------
-# 4. 상단 대시보드
+# 4. 상단 대시보드 (강화된 예산 현황 라인 추가)
 # -----------------------------
-st.markdown(f"### 📊 예산 기간: {budget_start.strftime('%Y/%m/%d')} ~ {budget_end.strftime('%m/%d')}")
+st.markdown(f"### 📊 자금 흐름 현황 (기간: {budget_start.strftime('%m/%d')} ~ {budget_end.strftime('%m/%d')})")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
 m2.metric("✅ 나간 고정비", f"{paid_fixed_sum:,.0f}원")
@@ -249,13 +248,23 @@ m3.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원")
 m4.metric("💰 총 현금 자산", f"{st.session_state.cash_data['total_balance']:,.0f}원")
 m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원")
 
+# [추가] 예산 상세 현황 라인 (크게 표시)
+st.markdown("---")
+st.markdown("### 🎯 주간/월간 예산 상세 현황")
+b1, b2, b3, b4, b5 = st.columns(5)
+b1.metric("🍔 식비 총 예산", f"{food_budget_total:,.0f}원")
+b2.metric("🧺 생활용품", f"{household_budget_total:,.0f}원")
+b3.metric("🚗 차량/교통", f"{transport_budget_total:,.0f}원")
+b4.metric("🚨 예비비", f"{em_budget_total:,.0f}원")
+# 누적 식비 절약/초과분 표시
+food_delta_label = "절약됨" if total_food_surplus_deficit >= 0 else "초과됨"
+b5.metric(f"🥗 식비 총 정산 ({food_delta_label})", f"{total_food_surplus_deficit:,.0f}원", delta=total_food_surplus_deficit)
+
 # -----------------------------
 # 5. 지출 달력
 # -----------------------------
 st.markdown("---")
 st.subheader("🗓️ 지출 달력")
-st.caption(f"📍 오늘은 {actual_today.strftime('%m월 %d일')}입니다. 연두색 테두리로 표시됩니다.")
-
 header_cols = st.columns(7)
 for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
     header_cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;'><b>{name}</b></div>", unsafe_allow_html=True)
@@ -275,13 +284,13 @@ for week in weeks:
         is_today = (current_date == actual_today)
         cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
-        # [사용자 요청] 일요일에 모든 잔액 표시
+        # [수정] 일요일에 주간 잔액 표시 (식비는 이월 없이 해당 주만 계산)
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_food_balances:
                 bals = weekly_food_balances[current_date]
                 cell_html.append(f"""
                 <div style='margin-bottom:10px; padding:5px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; line-height:1.4;'>
-                    🍞 식비잔액: {bals['food']:,.0f}<br>
+                    🍞 주간 식비잔액: {bals['food']:,.0f}<br>
                     🧺 생활용품: {bals['household']:,.0f}<br>
                     🚗 차량/교통: {bals['transport']:,.0f}<br>
                     🚨 예비비: {bals['reserve']:,.0f}
