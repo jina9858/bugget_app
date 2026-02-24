@@ -14,41 +14,30 @@ st.set_page_config(page_title="예산 관리자", layout="wide")
 st.sidebar.header("📱 디스플레이 설정")
 view_mode = st.sidebar.radio("화면 모드 선택", ["PC 모드 (기본 달력)", "모바일 모드 (세로 리스트)"], index=0)
 
-# [수정됨] 폰트 사이즈를 보기 좋게 맞춘 CSS 설정 (로직은 건드리지 않음)
+# [복구 및 수정 완료] 달력/숫자 크기는 원상복구하고 제목만 모바일에서 줄임
 st.markdown("""
     <style>
-        /* 1. 너무 큰 기본 제목(h1, h2, h3) 글자 크기 축소 */
-        h1 { font-size: 24px !important; padding-bottom: 10px !important; }
-        h2 { font-size: 20px !important; }
-        h3 { font-size: 16px !important; font-weight: 600 !important; }
-        
-        /* 2. 상단 요약(메트릭) 숫자 및 라벨 크기 축소 */
-        [data-testid="stMetricValue"] { font-size: 17px !important; }
-        [data-testid="stMetricLabel"] { font-size: 12px !important; color: #555 !important; }
-        
-        /* 3. PC 모드 달력 글씨 최적화 */
+        /* 1. 모바일에서 화면 절반을 차지하던 큰 제목(h1)만 크기 조절 */
+        @media screen and (max-width: 768px) {
+            h1 { font-size: 28px !important; }
+        }
+
+        /* 2. 달력 내부 텍스트 및 기본 숫자 크기 100% 완벽 복구 (예전의 시원한 크기) */
         .cal-content { font-size: 14px !important; line-height: 1.4; }
+        [data-testid="stMetricValue"] { font-size: 22px !important; }
         
-        /* 4. Z플립 6 모바일 모드 최적화 카드 디자인 */
+        /* 3. 모바일 카드 스타일 복구 */
         .mobile-card {
             border: 1px solid #e0e0e0;
             border-radius: 12px;
-            padding: 12px;
-            margin-bottom: 10px;
+            padding: 15px;
+            margin-bottom: 12px;
             background-color: #ffffff;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }
         .mobile-today {
             border: 2px solid #ccff00 !important;
             background-color: #fcfdf7;
-        }
-
-        /* 5. 좁은 모바일 화면일 때 글자 크기 한 번 더 부드럽게 축소 (반응형) */
-        @media screen and (max-width: 600px) {
-            h1 { font-size: 22px !important; }
-            h3 { font-size: 15px !important; }
-            [data-testid="stMetricValue"] { font-size: 15px !important; }
-            [data-testid="stMetricLabel"] { font-size: 11px !important; }
         }
     </style>
     """, unsafe_allow_html=True)
@@ -222,7 +211,7 @@ for _, r in v_period_df.iterrows():
 # -----------------------------
 # 4. 상단 대시보드
 # -----------------------------
-st.title(f"📅 {selected_month}월 예산 관리")
+st.title(f"📅 {selected_month}월 예산 달력")
 
 with st.expander("➕ 지출 추가하기", expanded=(view_mode == "PC 모드 (기본 달력)")):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
@@ -360,6 +349,7 @@ else:
         day_f = f_date_map.get(current_date, [])
         day_s = s_date_map.get(current_date, [])
         
+        # 비상금 인출이 있거나, 오늘이거나, 지출이 있는 날만 카드 생성
         has_withdrawal = w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date
         
         if not day_f and not day_s and not is_today and not has_withdrawal: 
@@ -374,27 +364,36 @@ else:
         
         html_lines.append(f"<div class='{card_class}' style='border-left: 6px solid {border_color};'>")
         
+        # 헤더 (날짜 및 일일 합계)
         today_badge = "<span style='color:#2ecc71; font-weight:bold; font-size:14px;'>[오늘]</span>" if is_today else ""
+        
         html_lines.append(f"<div style='display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px;'>")
-        html_lines.append(f"  <b style='font-size:18px; color:#333;'>{current_date.month}/{current_date.day} ({day_names[current_date.weekday()]}) {today_badge}</b>")
+        html_lines.append(f"  <b style='font-size:16px; color:#333;'>{current_date.month}/{current_date.day} ({day_names[current_date.weekday()]}) {today_badge}</b>")
         if f_sum > 0 or s_sum > 0:
             html_lines.append(f"  <span style='font-size:14px; color:#555; font-weight:bold;'>일일 합계: {f_sum + s_sum:,.0f}원</span>")
         html_lines.append(f"</div>")
         
+        # 비상금 표시
         if has_withdrawal:
             html_lines.append(f"<div style='background-color:#ff4b4b; color:white; padding:6px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
         
+        # 고정 지출 리스트
         if day_f:
-            html_lines.append(f"<div style='color:#e74c3c; font-size:15px; font-weight:bold; margin-top:5px;'>📌 고정 지출: {f_sum:,.0f}원</div>")
+            html_lines.append(f"<div style='color:#e74c3c; font-size:14px; font-weight:bold; margin-top:4px;'>📌 고정 지출: {f_sum:,.0f}원</div>")
             for e in day_f:
-                html_lines.append(f"<div style='font-size:14px; color:#c0392b; margin-left:15px; margin-top:2px;'>- {e.item} ({e.amount:,.0f}원)</div>")
+                html_lines.append(f"<div style='color:#c0392b; font-size:13px; margin-left: 12px; margin-top:2px;'>· {e.item} ({e.amount:,.0f}원)</div>")
         
+        # 변동 지출 리스트
         if day_s:
-            html_lines.append(f"<div style='color:#3498db; font-size:15px; font-weight:bold; margin-top:10px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
+            html_lines.append(f"<div style='color:#3498db; font-size:14px; font-weight:bold; margin-top:8px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
             for r in day_s:
                 m_txt = r['memo'] if r['memo'] else r['category']
-                html_lines.append(f"<div style='font-size:14px; color:#2980b9; margin-left:15px; margin-top:2px;'>- {m_txt} ({r['amount']:,.0f}원)</div>")
+                html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m_txt} ({r['amount']:,.0f}원)</div>")
         
+        # 내용이 아예 없는 날의 표시
+        if not day_f and not day_s and not has_withdrawal:
+            html_lines.append("<div style='color:#aaa; font-size:13px; text-align:center; padding: 10px 0;'>지출 내역 없음</div>")
+
         html_lines.append("</div>")
         st.markdown("".join(html_lines), unsafe_allow_html=True)
 
