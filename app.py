@@ -91,9 +91,9 @@ def save_fixed_events(events: List[Event]):
     save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in events])
 
 # -----------------------------
-# 2. 세션 상태 및 오늘 날짜 (2026-02-24)
+# 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
 # -----------------------------
-actual_today = dt.date(2026, 2, 24) #
+actual_today = dt.date(2026, 2, 24)
 
 if "income_data" not in st.session_state: 
     st.session_state.income_data = load_json(INCOME_FILE, {f"{YEAR}-{m:02d}": 0 for m in range(START_MONTH, END_MONTH + 1)})
@@ -206,8 +206,7 @@ padding = (7 - (len(full_grid) % 7)) % 7
 full_grid += [None] * padding
 weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
-# [핵심] 식비 주차별 균등 배분 계산
-# 설정한 기간의 달력 행(주차) 수에 맞춰 월 예산을 공평하게 나눕니다.
+# [핵심] 식비 주차별 균등 배분 계산 (정확히 n/1로 나누어 이월)
 weekly_food_base = food_budget_total / len(weeks)
 weekly_food_balances = {}
 food_carry = 0
@@ -216,14 +215,18 @@ for week_row in weeks:
     valid = [d for d in week_row if d is not None]
     if not valid: continue
     ws, we = valid[0], valid[-1]
-    # 해당 주차 기간 동안의 식비 지출 합산
+    
+    # 해당 주차 동안의 식비 지출 합산
     w_spent = int(df[(df["category"] == "식비") & (df["date"].dt.date >= ws) & (df["date"].dt.date <= we)]["amount"].sum())
-    # 공평하게 나눈 주간 예산 + 지난주 이월금
-    w_available = weekly_food_base + food_carry
-    w_balance = w_available - w_spent
-    # 일요일 칸(idx 6) 또는 기간 마지막 날에 잔액 배분
+    
+    # 이번 주 가용 예산 = (전체 주차별 균등 금액) + (지난주에서 넘어온 잔액)
+    w_balance = (weekly_food_base + food_carry) - w_spent
+    
+    # 일요일 칸 또는 기간 마지막 날에 잔액 매핑
     target_date = week_row[6] if (len(week_row) > 6 and week_row[6]) else we
     weekly_food_balances[target_date] = w_balance
+    
+    # 남은 금액을 다음 주로 이월
     food_carry = w_balance
 
 rem_em_in_period = em_budget_total - int(df[(df["category"] == "예비비") & (df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
@@ -266,7 +269,7 @@ for week in weeks:
         is_today = (current_date == actual_today)
         cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
-        # [수정] 식비 및 예비비 잔액을 오직 '일요일(idx 6)'에만 상단에 표시
+        # 일요일(idx 6)에만 주간 잔액 표시
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_food_balances:
                 cell_html.append(f"<div style='margin-bottom:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 식비: {weekly_food_balances[current_date]:,.0f} | 🚨 예비: {rem_em_in_period:,.0f}</div>")
@@ -289,7 +292,6 @@ for week in weeks:
                 txt = m if m else c
                 cell_html.append(f"<div style='color:#2980b9; font-size:10px;'>· {txt} ({a:,.0f})</div>")
         
-        # 오늘 날짜 연두색(#ccff00) 라운드 강조
         border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
         radius_style = "20px" if is_today else "8px"
         bg_color = "#fff4f4" if day_fixed else "#ffffff"
