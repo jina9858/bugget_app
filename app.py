@@ -12,15 +12,21 @@ st.set_page_config(page_title="예산 달력", layout="wide")
 
 st.markdown("""
     <style>
+        /* [추가됨] 왼쪽 사이드바 너비 넓게 펴주기 */
+        section[data-testid="stSidebar"] {
+            min-width: 340px !important;
+        }
+
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
-        h1 { font-size: 26px !important; }
-        /* 줄바꿈 방지를 위해 h3 기본 사이즈 지정 */
-        h3 { font-size: 18px !important; }
+        h1 { font-size: 18px !important; }
         
+        /* 줄바꿈 방지를 위해 3개 타이틀(h3) 기본 사이즈 지정 */
+        h3 { font-size: 18px !important; }
+
         @media screen and (max-width: 600px) {
-            h1 { font-size: 22px !important; margin-bottom: 5px !important; }
-            /* 모바일 화면일 때만 h3 사이즈를 줄여 한 줄에 쏙 들어가게 함 */
-            h3 { font-size: 15px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+            h1 { font-size: 18px !important; margin-bottom: 5px !important; }
+            /* 모바일 화면일 때만 3개 타이틀(h3) 사이즈를 14px로 줄이고 자간을 좁혀 한 줄에 쏙 들어가게 함 */
+            h3 { font-size: 14px !important; letter-spacing: -0.5px !important; }
         }
 
         /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
@@ -29,7 +35,7 @@ st.markdown("""
             line-height: 1.4;
         }
         [data-testid="stMetricValue"] {
-            font-size: 22px !important;
+            font-size: 18px !important;
         }
         
         /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
@@ -364,10 +370,7 @@ if view_mode == "PC 모드 (달력형)":
 
 else:
     st.subheader("📱 일자별 지출 내역 (모바일 리스트)")
-    
-    # [수정] 빈 날짜가 생략되어 달력이 중간에 짤려보이는 현상을 해결하기 위해 
-    # 안내 문구를 바꾸고, 지출 내역이 없는 날도 전부 표시되도록 변경했습니다.
-    st.caption("선택한 기간의 모든 날짜가 표시됩니다.")
+    st.caption("내용이 있는 날짜와 오늘만 표시됩니다.")
     
     day_names = ["월", "화", "수", "목", "금", "토", "일"]
     w_info = st.session_state.cash_data["monthly"].get(month_key, {})
@@ -379,8 +382,8 @@ else:
         
         has_withdrawal = w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date
         
-        # [삭제됨] 이전에는 지출이 없는 날은 continue로 넘겨버렸지만, 
-        # 이제 끝까지 모두 보일 수 있도록 해당 코드를 없앴습니다.
+        if not day_fixed and not day_spent and not is_today and not has_withdrawal: 
+            continue 
             
         f_sum = sum(e.amount for e in day_fixed)
         s_sum = sum(a for _, a, _ in day_spent)
@@ -448,7 +451,6 @@ else:
                 m_txt = m if m else c
                 html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m_txt} ({a:,.0f}원)</div>")
         
-        # [수정] 내역이 없는 날에는 빈 칸 대신 '지출 내역 없음'이 나오도록 표시
         if not day_fixed and not day_spent and not has_withdrawal and not (current_date.weekday() == 6 or current_date == budget_end):
             html_lines.append("<div style='color:#aaa; font-size:13px; text-align:center; padding: 10px 0;'>지출 내역 없음</div>")
 
