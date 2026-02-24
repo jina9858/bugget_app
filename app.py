@@ -18,7 +18,7 @@ st.markdown("""
         }
 
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
-        h1 { font-size: 18px !important; }
+        h1 { font-size: 22px !important; }
         
         /* 줄바꿈 방지를 위해 3개 타이틀(h3) 기본 사이즈 지정 */
         h3 { font-size: 18px !important; }
@@ -35,7 +35,7 @@ st.markdown("""
             line-height: 1.4;
         }
         [data-testid="stMetricValue"] {
-            font-size: 18px !important;
+            font-size: 16px !important;
         }
         
         /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
