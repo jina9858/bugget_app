@@ -105,7 +105,15 @@ if "df" not in st.session_state:
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
 # ---------- Sidebar ----------
-st.sidebar.header("⚙️ 예산 설정")
+st.sidebar.header("⚙️ 기준 설정")
+
+# [핵심] 실행 날짜 설정 (시뮬레이션용)
+simulated_today = st.sidebar.date_input(
+    "🗓️ 기준 날짜 설정 (오늘)", 
+    value=dt.date.today(),
+    help="이 날짜를 기준으로 주간 예산 차감 및 현재 주차가 결정됩니다."
+)
+
 selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
 
 st.sidebar.markdown("---")
@@ -157,19 +165,24 @@ f_total = sum(e.amount for e in cur_fixed_list)
 v_total = int(m_df["amount"].sum())
 total_balance = cur_inc - f_total - v_total + monthly_carry_over
 
-# [주간 식비 계산 및 매핑]
+# [주간 식비 계산]
 total_days = last_day(YEAR, selected_month)
 week_ranges = [(1, 7), (8, 14), (15, 21), (22, total_days)]
 weekly_food_base = food_budget_total / len(week_ranges)
 
 weekly_food_results = {}
 food_carry = 0
+# 설정한 기준 날짜(simulated_today)를 사용하여 현재 주차 판단
+today_day = simulated_today.day if (simulated_today.month == selected_month and simulated_today.year == YEAR) else 0
+current_week_info = None
+
 for i, (ws, we) in enumerate(week_ranges):
     w_spent = int(m_df[(m_df["category"] == "식비") & (m_df["date"].dt.day >= ws) & (m_df["date"].dt.day <= we)]["amount"].sum())
     w_available = weekly_food_base + food_carry
     w_balance = w_available - w_spent
-    # 주차의 마지막 날에 잔액을 표시하기 위해 저장
     weekly_food_results[we] = w_balance
+    if ws <= today_day <= we:
+        current_week_info = {"주차": f"{i+1}주차", "잔액": w_balance, "지출": w_spent}
     food_carry = w_balance
 
 # [예비비 잔액 계산]
@@ -180,6 +193,8 @@ rem_em_monthly = em_budget_total - spent_em_total
 # 4. 상단 대시보드
 # -----------------------------
 st.markdown("### 📊 종합 예산 현황")
+# 기준 날짜 안내
+st.caption(f"📍 현재 기준 날짜: {simulated_today.strftime('%Y년 %m월 %d일')}")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
 m2.metric("고정비", f"{f_total:,.0f}원")
@@ -187,13 +202,22 @@ m3.metric("변동지출", f"{v_total:,.0f}원")
 m4.metric("지난달 이월", f"{monthly_carry_over:,.0f}원", delta=monthly_carry_over)
 m5.metric("최종 잔액", f"{total_balance:,.0f}원")
 
+# --- 식비 주간 이월 현황 ---
+st.markdown("---")
+st.markdown("### 🍞 식비 주간 이월 관리")
+if current_week_info:
+    c1, c2 = st.columns(2)
+    c1.metric(f"이번 주({current_week_info['주차']}) 식비 잔액", f"{current_week_info['잔액']:,.0f}원", delta=current_week_info['잔액'])
+    with st.expander("📅 주차별 상세 식비 흐름 보기"):
+        st.table(pd.DataFrame([{"주차": f"{i+1}주차", "잔액": v} for i, v in enumerate(weekly_food_results.values())]))
+else:
+    st.info("선택한 월이 기준 날짜와 일치하지 않아 주간 현황이 표시되지 않습니다.")
+
 # -----------------------------
 # 5. 지출 달력 (상세 내역 + 잔액 표시)
 # -----------------------------
 st.markdown("---")
 st.subheader("🗓️ 지출 달력")
-st.caption("💡 각 주 일요일에는 **'주간 식비 잔액'**이, 매일 하단에는 **'월간 예비비 잔액'**이 표시됩니다.")
-
 cal_obj = calendar.Calendar(firstweekday=0)
 weeks_list = cal_obj.monthdayscalendar(YEAR, selected_month)
 
@@ -201,12 +225,10 @@ f_date_map = {}; s_date_map = {}
 for e in cur_fixed_list: f_date_map.setdefault(e.date.day, []).append(e)
 for _, r in m_df.iterrows(): s_date_map.setdefault(int(r["date"].day), []).append((r["category"], r["amount"], r["memo"]))
 
-# 요일 헤더
 cols = st.columns(7)
 for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
     cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;'><b>{name}</b></div>", unsafe_allow_html=True)
 
-# 달력 렌더링
 for week in weeks_list:
     cols = st.columns(7)
     for idx, day_num in enumerate(week):
@@ -219,9 +241,12 @@ for week in weeks_list:
         sum_fixed = sum(e.amount for e in day_fixed)
         sum_spent = sum(a for _, a, _ in day_spent)
         
-        cell_html = [f"<div style='font-weight:bold; color:#333; margin-bottom:5px;'>{day_num}</div>"]
+        # 오늘 날짜 하이라이트
+        is_today = (day_num == simulated_today.day and selected_month == simulated_today.month)
+        today_style = "border: 2px solid #2ecc71;" if is_today else "border: 1px solid #ddd;"
         
-        # 지출 내역 표시
+        cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'}; margin-bottom:5px;'>{day_num} {'(오늘)' if is_today else ''}</div>"]
+        
         if day_fixed:
             cell_html.append(f"<div style='color:#e74c3c; font-size:11px; font-weight:bold;'>고정: {sum_fixed:,.0f}</div>")
             for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item} ({e.amount:,.0f})</div>")
@@ -231,22 +256,18 @@ for week in weeks_list:
                 txt = m if m else c
                 cell_html.append(f"<div style='color:#2980b9; font-size:10px;'>· {txt} ({a:,.0f})</div>")
         
-        # --- [추가] 잔액 표시 영역 ---
+        # 잔액 표시 (주간 식비 / 월 예비비)
         footer_html = []
-        # 1. 주간 식비 잔액 표시 (주차의 마지막 날짜에 표시)
         if day_num in weekly_food_results:
             w_bal = weekly_food_results[day_num]
-            color = "#27ae60" if w_bal >= 0 else "#e67e22"
-            footer_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:11px; color:{color}; font-weight:bold; text-align:center;'>🍞 주간 식비 잔액: {w_bal:,.0f}</div>")
-        
-        # 2. 월간 예비비 잔액 표시 (매일 하단에 표시)
-        footer_html.append(f"<div style='margin-top:5px; font-size:10px; color:#7f8c8d; text-align:right;'>🚨 예비비 잔액: {rem_em_monthly:,.0f}</div>")
+            footer_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:11px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 주간 잔액: {w_bal:,.0f}</div>")
+        footer_html.append(f"<div style='margin-top:5px; font-size:10px; color:#7f8c8d; text-align:right;'>🚨 예비비: {rem_em_monthly:,.0f}</div>")
         
         cell_html.append("".join(footer_html))
         
         bg_color = "#ffffff" if not day_fixed else "#fff4f4"
         cols[idx].markdown(f"""
-            <div style="height:200px; border:1px solid #ddd; padding:8px; background:{bg_color}; border-radius:8px; overflow-y:auto;">
+            <div style="height:200px; {today_style} padding:8px; background:{bg_color}; border-radius:8px; overflow-y:auto;">
                 {"".join(cell_html)}
             </div>
         """, unsafe_allow_html=True)
