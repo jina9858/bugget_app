@@ -7,22 +7,15 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
-# 0. 페이지 기본 설정
+# 0. 페이지 기본 설정 및 [달력 전용 글씨 최적화 CSS]
 st.set_page_config(page_title="예산 달력", layout="wide")
 
 st.markdown("""
     <style>
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
         h1 { font-size: 26px !important; }
-        /* 줄바꿈 방지를 위해 h2, h3 기본 사이즈 추가 */
-        h2 { font-size: 20px !important; }
-        h3 { font-size: 18px !important; }
-        
         @media screen and (max-width: 600px) {
             h1 { font-size: 22px !important; margin-bottom: 5px !important; }
-            /* 모바일에서 줄바꿈되는 제목(자금흐름, 진단 등) 사이즈 축소 */
-            h2 { font-size: 17px !important; }
-            h3 { font-size: 15px !important; }
         }
 
         /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
@@ -214,7 +207,6 @@ for m in range(START_MONTH, selected_month):
     monthly_carry_over += (m_inc - m_fixed - m_var)
 
 cur_inc = st.session_state.income_data.get(month_key, 0)
-# [에러 수정] period_fixed_events 변수명 통일
 period_fixed_events = [e for e in st.session_state.fixed_events if budget_start <= e.date <= budget_end]
 paid_fixed_sum = sum(e.amount for e in period_fixed_events if e.date <= actual_today)
 rem_fixed_sum = sum(e.amount for e in period_fixed_events if e.date > actual_today)
@@ -296,7 +288,7 @@ b5.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{(em_bu
 b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", delta="정산 총합", delta_color="off")
 
 # -----------------------------
-# 5. 지출 추가 및 달력/리스트
+# 5. 지출 달력 (모드 분기 처리)
 # -----------------------------
 st.markdown("---")
 
@@ -312,14 +304,13 @@ with st.expander("➕ 지출 추가하기", expanded=True):
             new_row = pd.DataFrame([{"date": pd.to_datetime(d), "category": cat, "memo": memo, "amount": int(amt)}])
             st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True); st.rerun()
 
-# 공통 데이터 매핑 (에러 수정)
+# 공통 매핑 데이터 생성 (기존 코드에서 활용)
 f_date_map = {}; s_date_map = {}
-# [에러 수정] period_fixed_events 변수명 통일
 for e in period_fixed_events: f_date_map.setdefault(e.date, []).append(e)
 for _, r in v_period_df.iterrows(): s_date_map.setdefault(r["date"].date(), []).append((r["category"], r["amount"], r["memo"]))
 
 if view_mode == "PC 모드 (달력형)":
-    # --- 기존 7칸 달력 100% 원본 유지 ---
+    # --- [원본 100% 유지] 기존 PC용 7칸 달력 ---
     st.subheader("🗓️ 지출 달력")
     st.caption(f"📍 오늘은 {actual_today.strftime('%m월 %d일')}입니다. 연두색 테두리로 표시됩니다.")
     header_cols = st.columns(7)
@@ -369,9 +360,8 @@ if view_mode == "PC 모드 (달력형)":
             cols[idx].markdown(f"<div style='height:280px; border: {border_style}; padding:8px; background:{bg_style}; border-radius:{rad_style}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
 else:
-    # --- 모바일용 세로 리스트형 ---
+    # --- [추가됨] Z플립 6 최적화 모바일 세로모드 ---
     st.subheader("📱 일자별 지출 내역 (모바일 리스트)")
-    st.caption("내용이 있는 날짜와 오늘만 표시됩니다.")
     
     day_names = ["월", "화", "수", "목", "금", "토", "일"]
     w_info = st.session_state.cash_data["monthly"].get(month_key, {})
@@ -381,31 +371,31 @@ else:
         day_fixed = f_date_map.get(current_date, [])
         day_spent = s_date_map.get(current_date, [])
         
-        # [에러 수정] has_withdrawal 변수 선언 위치 수정
+        # 비상금 인출이 있거나, 오늘이거나, 지출이 있는 날만 카드 생성
         has_withdrawal = w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date
         
-        if not day_f and not day_s and not is_today and not has_withdrawal: 
-            continue 
-            
-        f_sum = sum(e.amount for e in day_fixed)
-        s_sum = sum(a for _, a, _ in day_spent)
-        
+        # 태그 깨짐 방지를 위해 HTML 문자열 리스트로 순차적 빌드
         html_lines = []
         card_class = "mobile-card mobile-today" if is_today else "mobile-card"
-        border_color = "#e74c3c" if day_fixed else "#3498db"
         
-        html_lines.append(f"<div class='{card_class}' style='border-left: 6px solid {border_color};'>")
+        html_lines.append(f"<div class='{card_class}'>")
         
+        # 헤더 (날짜 및 일일 합계)
+        f_sum = sum(e.amount for e in day_fixed)
+        s_sum = sum(a for _, a, _ in day_spent)
         today_badge = "<span style='color:#2ecc71; font-weight:bold; font-size:14px;'>[오늘]</span>" if is_today else ""
+        
         html_lines.append(f"<div style='display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px;'>")
-        html_lines.append(f"  <b style='font-size:18px; color:#333;'>{current_date.month}/{current_date.day} ({day_names[current_date.weekday()]}) {today_badge}</b>")
+        html_lines.append(f"  <b style='font-size:16px; color:#333;'>{current_date.month}/{current_date.day} ({day_names[current_date.weekday()]}) {today_badge}</b>")
         if f_sum > 0 or s_sum > 0:
             html_lines.append(f"  <span style='font-size:14px; color:#555; font-weight:bold;'>일일 합계: {f_sum + s_sum:,.0f}원</span>")
         html_lines.append(f"</div>")
         
+        # 비상금 표시
         if has_withdrawal:
             html_lines.append(f"<div style='background-color:#ff4b4b; color:white; padding:6px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
         
+        # 일요일 정산 박스 (PC와 동일하게 표시)
         if current_date.weekday() == 6 or current_date == budget_end:
             if current_date in weekly_balances:
                 b = weekly_balances[current_date]
@@ -422,17 +412,20 @@ else:
                 </div>
                 """)
 
+        # 고정 지출 리스트
         if day_fixed:
             html_lines.append(f"<div style='color:#e74c3c; font-size:14px; font-weight:bold; margin-top:4px;'>📌 고정 지출: {f_sum:,.0f}원</div>")
             for e in day_fixed:
                 html_lines.append(f"<div style='color:#c0392b; font-size:13px; margin-left: 12px; margin-top:2px;'>· {e.item} ({e.amount:,.0f}원)</div>")
         
+        # 변동 지출 리스트
         if day_spent:
             html_lines.append(f"<div style='color:#3498db; font-size:14px; font-weight:bold; margin-top:8px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
             for c, a, m in day_spent:
                 m_txt = m if m else c
                 html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m_txt} ({a:,.0f}원)</div>")
         
+        # 내용이 아예 없는 날의 표시
         if not day_fixed and not day_spent and not has_withdrawal and not (current_date.weekday() == 6 or current_date == budget_end):
             html_lines.append("<div style='color:#aaa; font-size:13px; text-align:center; padding: 10px 0;'>지출 내역 없음</div>")
 
