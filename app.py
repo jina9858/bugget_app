@@ -64,7 +64,6 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
     feb_cutoff = dt.date(YEAR, 2, 22)
     
     for m in range(start_month, end_month + 1):
-        # 매월 공통 고정비
         events += [
             Event(dt.date(year, m, 5),  "생활/구독", "금천누리복지 후원", 50_000, "정기 후원"),
             Event(dt.date(year, m, 9),  "통신",     "LGU+ 휴대폰",      19_220, "최근 평균"),
@@ -81,20 +80,16 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
             Event(dt.date(year, m, 25), "보험",     "카카오페이 운전자보험", 8_800, "매월 25일"),
             Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",       32_830, "고정"),
         ]
-        # 주기적 보험료
         for dday in [5, 10, 15, 20, 25, 30]:
             if dday <= last_day(year, m):
                 events.append(Event(dt.date(year, m, dday), "보험", "메리츠 운전자보험", 10_280, "5일 주기"))
-        # 구독 서비스 (3월부터)
         if m >= 3:
             events.append(Event(dt.date(year, m, 13), "생활/구독", "네이버 멤버십", 4_900, "다음구독 3/13"))
             events.append(Event(dt.date(year, m, 24), "생활/구독", "AI 구독",      30_000, "다음결제 3/24"))
-        # 관리비 (월말)
         ld = dt.date(year, m, last_day(year, m))
         debit = next_monday_if_weekend(ld)
         events.append(Event(debit, "주거/공과금", "관리비", 110_000, "월말(주말이면 다음월요일)"))
 
-    # 2월 22일 이전 데이터 필터링
     return [e for e in events if not (e.date.year == YEAR and e.date.month == 2 and e.date < feb_cutoff)]
 
 def events_to_dict(events: List[Event]) -> List[dict]:
@@ -144,7 +139,6 @@ if "df" not in st.session_state:
 # ---------- Sidebar ----------
 st.sidebar.header("⚙️ 설정 및 편집")
 
-# 월 선택
 selected_month = st.sidebar.selectbox(
     "조회 월 선택",
     options=list(range(START_MONTH, END_MONTH + 1)),
@@ -155,15 +149,12 @@ selected_month = st.sidebar.selectbox(
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💰 수입 편집")
 with st.sidebar.expander("월별 수입 수정", expanded=False):
-    income_list = [{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()]
-    income_df = pd.DataFrame(income_list)
+    income_df = pd.DataFrame([{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()])
     edited_income = st.data_editor(income_df, use_container_width=True, hide_index=True)
-    
     if st.button("수입 저장"):
         new_income_dict = dict(zip(edited_income["월"], edited_income["수입(원)"]))
         save_income(new_income_dict)
         st.session_state.income_data = new_income_dict
-        st.success("수입 저장 완료!")
         st.rerun()
 
 current_income = st.session_state.income_data.get(f"{YEAR}-{selected_month:02d}", 0)
@@ -174,12 +165,10 @@ st.sidebar.markdown("### 🛠️ 고정비 관리")
 with st.sidebar.expander("고정비 상세 수정", expanded=False):
     fixed_df_ui = pd.DataFrame(events_to_dict(st.session_state.fixed_events))
     edited_fixed = st.data_editor(fixed_df_ui, use_container_width=True, num_rows="dynamic")
-
     if st.button("✅ 고정비 저장"):
         new_evs = dict_to_events(edited_fixed.to_dict(orient="records"))
         save_fixed_events(new_evs)
         st.session_state.fixed_events = new_evs
-        st.success("고정비 저장 완료!")
         st.rerun()
 
 # ---------- Main ----------
@@ -189,7 +178,9 @@ st.title(f"📅 {YEAR}년 {selected_month}월 예산 달력")
 with st.expander("➕ 새로운 지출 추가", expanded=True):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
     with c1: d = st.date_input("날짜", value=dt.date(YEAR, selected_month, 1))
-    with c2: cat = st.selectbox("분류", ["식비", "예비비", "기타"])
+    with c2: 
+        # 분류 리스트를 자유롭게 수정 가능
+        cat = st.selectbox("분류", ["식비", "예비비", "생활용품", "교통/차량", "의료/건강", "기타"])
     with c3: memo = st.text_input("내용", placeholder="지출 내역 요약")
     with c4: amt = st.number_input("금액(원)", min_value=0, step=1000)
 
@@ -204,13 +195,11 @@ with st.expander("➕ 새로운 지출 추가", expanded=True):
 df = st.session_state.df.copy()
 m_df = df[(df["date"].dt.year == YEAR) & (df["date"].dt.month == selected_month)]
 v_total = int(m_df["amount"].sum())
-
-# 해당 월 고정비 추출
 current_fixed = [e for e in st.session_state.fixed_events if e.date.year == YEAR and e.date.month == selected_month]
 f_total = sum(e.amount for e in current_fixed)
 remaining = current_income - f_total - v_total
 
-# 상단 대시보드
+# 대시보드
 s1, s2, s3, s4 = st.columns(4)
 s1.metric("월 수입", f"{current_income:,.0f}원")
 s2.metric("고정비 합계", f"{f_total:,.0f}원")
@@ -218,33 +207,28 @@ s3.metric("변동지출 합계", f"{v_total:,.0f}원")
 s4.metric("남은 잔액", f"{remaining:,.0f}원")
 
 # -----------------------------
-# 달력 렌더링 (상세 내역 표시)
+# 달력 렌더링 (금액 전체 표시)
 # -----------------------------
 st.subheader("이번 달 지출 현황")
 cal = calendar.Calendar(firstweekday=0)
 weeks = cal.monthdayscalendar(YEAR, selected_month)
 
-# 고정비/변동비 매핑
 f_map = {}
-for e in current_fixed:
-    f_map.setdefault(e.date.day, []).append(e)
+for e in current_fixed: f_map.setdefault(e.date.day, []).append(e)
 
 s_map = {}
-for _, r in m_df.iterrows():
-    s_map.setdefault(int(r["date"].day), []).append((r["category"], r["amount"], r["memo"]))
+for _, r in m_df.iterrows(): s_map.setdefault(int(r["date"].day), []).append((r["category"], r["amount"], r["memo"]))
 
-# 요일 헤더
 days = ["월", "화", "수", "목", "금", "토", "일"]
 cols = st.columns(7)
 for i, d_name in enumerate(days): 
     cols[i].markdown(f"<div style='text-align:center;'><b>{d_name}</b></div>", unsafe_allow_html=True)
 
-# 주차별 렌더링
 for week in weeks:
     cols = st.columns(7)
     for i, daynum in enumerate(week):
         if daynum == 0:
-            cols[i].markdown("<div style='height:150px; background:#f0f2f6; border-radius:8px;'></div>", unsafe_allow_html=True)
+            cols[i].markdown("<div style='height:160px; background:#f0f2f6; border-radius:8px;'></div>", unsafe_allow_html=True)
             continue
         
         f_list = f_map.get(daynum, [])
@@ -252,41 +236,32 @@ for week in weeks:
         f_sum = sum(e.amount for e in f_list)
         s_sum = sum(a for _, a, _ in s_list)
         
-        # 날짜 번호
         content = [f"<div style='font-weight:bold; border-bottom:1px solid #eee; margin-bottom:5px;'>{daynum}</div>"]
         
-        # 고정비 리스트 표시 (항목명 + 금액)
+        # 고정비 표시 (K 제거)
         if f_list:
             content.append(f"<div style='color:#e74c3c; font-size:11px; font-weight:bold;'>고정: {f_sum:,.0f}</div>")
             for e in f_list:
-                content.append(f"<div style='color:#c0392b; font-size:10px; line-height:1.2;'>· {e.item} ({e.amount/1000:,.0f}k)</div>")
+                content.append(f"<div style='color:#c0392b; font-size:10px; line-height:1.2;'>· {e.item} ({e.amount:,.0f})</div>")
         
-        # 변동지출 리스트 표시 (내용 + 금액)
+        # 변동지출 표시 (K 제거)
         if s_list:
             content.append(f"<div style='color:#3498db; font-size:11px; font-weight:bold; margin-top:5px;'>변동: {s_sum:,.0f}</div>")
             for cat, amt, memo in s_list:
                 display_text = memo if memo else cat
-                content.append(f"<div style='color:#2980b9; font-size:10px; line-height:1.2;'>· {display_text} ({amt/1000:,.0f}k)</div>")
+                content.append(f"<div style='color:#2980b9; font-size:10px; line-height:1.2;'>· {display_text} ({amt:,.0f})</div>")
         
-        # 고정비 있는 날 배경색 다르게
         bg = "#ffffff" if not f_list else "#fff4f4"
-        
         cols[i].markdown(f"""
-            <div style="height:150px; border:1px solid #ddd; padding:8px; background:{bg}; border-radius:8px; overflow-y:auto;">
+            <div style="height:160px; border:1px solid #ddd; padding:8px; background:{bg}; border-radius:8px; overflow-y:auto;">
                 {"".join(content)}
             </div>
         """, unsafe_allow_html=True)
 
-# 지출 내역 상세
+# 상세 내역
 st.markdown("---")
 st.subheader("📜 지출 내역 상세")
 if not m_df.empty:
     st.dataframe(m_df.assign(date=m_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
-    with st.expander("항목 삭제"):
-        to_delete = st.multiselect("삭제할 항목 선택", options=m_df.index, 
-                                   format_func=lambda x: f"{m_df.loc[x,'date'].date()} | {m_df.loc[x,'memo']} | {m_df.loc[x,'amount']:,}원")
-        if st.button("선택 항목 삭제"):
-            st.session_state.df = st.session_state.df.drop(to_delete).reset_index(drop=True)
-            st.rerun()
 else:
-    st.info("이번 달 지출 내역이 없습니다.")
+    st.info("기록된 지출이 없습니다.")
