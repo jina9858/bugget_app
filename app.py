@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import calendar
 import datetime as dt
+import json
+import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
@@ -47,6 +49,10 @@ def next_monday_if_weekend(d: dt.date) -> dt.date:
     return d
 
 def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) -> List[Event]:
+    """
+    기본 고정비 템플릿(초기값).
+    이후에는 앱에서 편집 + 저장된 fixed_events.json을 우선 사용.
+    """
     events: List[Event] = []
     for m in range(start_month, end_month + 1):
         # 고정비(기본)
@@ -58,21 +64,21 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
             Event(dt.date(year, m, 12), "공과금",   "수도요금",         28_370, "평균치"),
 
             # 계돈/송금 (23~25일 → 대표일 23일로 표시)
-            Event(dt.date(year, m, 23), "계돈/송금", "계돈(김아름)",    100_000, "23~25일"),
-            Event(dt.date(year, m, 23), "계돈/송금", "정기송금(김주환)",100_000, "23~25일"),
-            Event(dt.date(year, m, 23), "계돈/송금", "계돈(우연지)",     30_000, "23~25일"),
-            Event(dt.date(year, m, 23), "계돈/송금", "계돈(김영민)",     20_000, "23~25일"),
+            Event(dt.date(year, m, 23), "계돈/송금", "계돈(김아름)",     100_000, "23~25일"),
+            Event(dt.date(year, m, 23), "계돈/송금", "정기송금(김주환)", 100_000, "23~25일"),
+            Event(dt.date(year, m, 23), "계돈/송금", "계돈(우연지)",      30_000, "23~25일"),
+            Event(dt.date(year, m, 23), "계돈/송금", "계돈(김영민)",      20_000, "23~25일"),
 
             # 25~26일 → 대표일 25일로 표시
-            Event(dt.date(year, m, 25), "금융/보험", "교보생명",        212_108, "25~26일"),
-            Event(dt.date(year, m, 25), "금융/보험", "농협생명",        136_200, "25~26일"),
-            Event(dt.date(year, m, 25), "공과금",   "전기요금",         26_166, "25~26일"),
+            Event(dt.date(year, m, 25), "금융/보험", "교보생명",         212_108, "25~26일"),
+            Event(dt.date(year, m, 25), "금융/보험", "농협생명",         136_200, "25~26일"),
+            Event(dt.date(year, m, 25), "공과금",   "전기요금",          26_166, "25~26일"),
 
             # 카카오페이 운전자보험: 25일
             Event(dt.date(year, m, 25), "보험",     "카카오페이 운전자보험", 8_800, "매월 25일"),
 
             # 인터넷: 26일
-            Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",      32_830, "고정"),
+            Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",       32_830, "고정"),
         ]
 
         # 메리츠 운전자보험: 5일 주기(5/10/15/20/25/30)
@@ -98,7 +104,54 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
         filtered.append(e)
     return filtered
 
-FIXED_EVENTS = build_fixed_events()
+# -----------------------------
+# 고정비 저장/불러오기(JSON)
+# -----------------------------
+FIXED_FILE = "fixed_events.json"
+
+def events_to_dict(events: List[Event]) -> List[dict]:
+    return [
+        {
+            "date": e.date.isoformat(),
+            "category": e.category,
+            "item": e.item,
+            "amount": int(e.amount),
+            "note": e.note,
+        }
+        for e in events
+    ]
+
+def dict_to_events(rows: List[dict]) -> List[Event]:
+    out: List[Event] = []
+    for r in rows:
+        out.append(
+            Event(
+                date=dt.date.fromisoformat(str(r["date"])),
+                category=str(r.get("category", "")),
+                item=str(r.get("item", "")),
+                amount=int(r.get("amount", 0) or 0),
+                note=str(r.get("note", "")),
+            )
+        )
+    return out
+
+def save_fixed_events(events: List[Event]) -> None:
+    with open(FIXED_FILE, "w", encoding="utf-8") as f:
+        json.dump(events_to_dict(events), f, ensure_ascii=False, indent=2)
+
+def load_fixed_events() -> List[Event]:
+    if os.path.exists(FIXED_FILE):
+        with open(FIXED_FILE, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+        return dict_to_events(rows)
+
+    # 처음 실행이면 기본값 생성 후 저장
+    base = build_fixed_events()
+    save_fixed_events(base)
+    return base
+
+# 전역 고정비 리스트(앱에서 편집 후 갱신)
+FIXED_EVENTS: List[Event] = load_fixed_events()
 
 def fixed_events_for_month(year: int, month: int) -> List[Event]:
     return [e for e in FIXED_EVENTS if e.date.year == year and e.date.month == month]
@@ -106,6 +159,9 @@ def fixed_events_for_month(year: int, month: int) -> List[Event]:
 def fixed_total_for_month(year: int, month: int) -> int:
     return sum(e.amount for e in fixed_events_for_month(year, month))
 
+# -----------------------------
+# 지출 데이터 상태
+# -----------------------------
 def ensure_state():
     if "df" not in st.session_state:
         st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
@@ -127,14 +183,65 @@ st.sidebar.markdown("### 예산(월)")
 food_budget = st.sidebar.number_input("식비 예산", min_value=0, value=MONTHLY_FOOD_BUDGET, step=10_000)
 em_budget = st.sidebar.number_input("예비비 예산", min_value=0, value=MONTHLY_EMERGENCY_BUDGET, step=10_000)
 
-# CSV 저장/불러오기 (핸드폰/클라우드에서도 유지하려면 필수)
-st.sidebar.markdown("### 데이터")
-csv = st.sidebar.download_button(
-    "지출 CSV 다운로드",
+# --- 고정비 편집 ---
+st.sidebar.markdown("### 고정비 편집")
+with st.sidebar.expander("고정비 수정/추가/삭제 후 저장", expanded=False):
+    fixed_df = pd.DataFrame([{
+        "date": e.date.isoformat(),      # YYYY-MM-DD
+        "category": e.category,
+        "item": e.item,
+        "amount": e.amount,
+        "note": e.note
+    } for e in FIXED_EVENTS])
+
+    st.caption("※ date는 YYYY-MM-DD 형식(예: 2026-03-24). 금액은 숫자만.")
+    edited = st.data_editor(
+        fixed_df,
+        use_container_width=True,
+        num_rows="dynamic",
+        key="fixed_editor"
+    )
+
+    cA, cB = st.columns(2)
+    with cA:
+        if st.button("✅ 고정비 저장"):
+            try:
+                tmp = edited.copy()
+
+                # 유효성(최소) 체크 + 정리
+                tmp["date"] = pd.to_datetime(tmp["date"]).dt.date.astype(str)
+                tmp["amount"] = tmp["amount"].fillna(0).astype(int)
+                tmp["category"] = tmp["category"].fillna("").astype(str)
+                tmp["item"] = tmp["item"].fillna("").astype(str)
+                tmp["note"] = tmp["note"].fillna("").astype(str)
+
+                new_events = dict_to_events(tmp.to_dict(orient="records"))
+                save_fixed_events(new_events)
+
+                # 전역 리스트 갱신
+                FIXED_EVENTS[:] = new_events
+                st.success("저장 완료! 달력/고정비 합계에 즉시 반영됩니다.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"저장 실패: {e}")
+
+    with cB:
+        if st.button("🔄 기본값으로 초기화"):
+            base = build_fixed_events()
+            save_fixed_events(base)
+            FIXED_EVENTS[:] = base
+            st.success("초기화 완료!")
+            st.rerun()
+
+# CSV 저장/불러오기 (지출)
+st.sidebar.markdown("### 지출 데이터")
+st.sidebar.download_button(
+    "지출 CSV 다운로드(백업)",
     data=st.session_state.df.assign(date=st.session_state.df["date"].dt.date).to_csv(index=False).encode("utf-8-sig"),
     file_name="expenses.csv",
     mime="text/csv"
 )
+
 up = st.sidebar.file_uploader("CSV 업로드(복원)", type=["csv"])
 if up is not None:
     try:
@@ -153,7 +260,12 @@ st.title(f"{YEAR}년 {month}월 예산 달력")
 with st.expander("➕ 지출 입력", expanded=True):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
     with c1:
-        d = st.date_input("날짜", value=dt.date(YEAR, month, 1), min_value=dt.date(YEAR, START_MONTH, 1), max_value=dt.date(YEAR, END_MONTH, last_day(YEAR, END_MONTH)))
+        d = st.date_input(
+            "날짜",
+            value=dt.date(YEAR, month, 1),
+            min_value=dt.date(YEAR, START_MONTH, 1),
+            max_value=dt.date(YEAR, END_MONTH, last_day(YEAR, END_MONTH))
+        )
     with c2:
         cat = st.selectbox("분류", ["식비", "예비비", "기타"])
     with c3:
@@ -184,6 +296,7 @@ var_em   = int(month_df.loc[month_df["category"] == "예비비", "amount"].sum()
 var_etc  = int(month_df.loc[month_df["category"] == "기타", "amount"].sum())
 var_total = var_food + var_em + var_etc
 
+fixed_total = fixed_total_for_month(YEAR, month)
 remaining = income - fixed_total - var_total
 
 # 요약 박스
@@ -194,7 +307,7 @@ s3.metric("변동지출(입력)", f"{var_total:,.0f}원")
 s4.metric("월 잔액", f"{remaining:,.0f}원")
 s5.metric("식비/예비비/기타", f"{var_food:,.0f} / {var_em:,.0f} / {var_etc:,.0f}원")
 
-# 달력 표시: 각 날짜 칸에 (고정비 + 입력지출 합계 + 내역) 표시
+# 달력 표시
 st.subheader("달력")
 cal = calendar.Calendar(firstweekday=0)  # 월요일 시작
 weeks = cal.monthdayscalendar(YEAR, month)
@@ -210,6 +323,7 @@ for _, r in month_df.iterrows():
     day = int(r["date"].day)
     spent_map.setdefault(day, []).append((r["category"], int(r["amount"]), str(r["memo"])))
 
+
 # 요일 헤더
 cols = st.columns(7)
 for i, name in enumerate(["월","화","수","목","금","토","일"]):
@@ -220,7 +334,10 @@ for week in weeks:
     cols = st.columns(7)
     for i, daynum in enumerate(week):
         if daynum == 0:
-            cols[i].markdown("<div style='height:150px; border:1px solid #eee; background:#f7f7f7'></div>", unsafe_allow_html=True)
+            cols[i].markdown(
+                "<div style='height:150px; border:1px solid #eee; background:#f7f7f7'></div>",
+                unsafe_allow_html=True
+            )
             continue
 
         fixed_list = fixed_map.get(daynum, [])
@@ -232,20 +349,19 @@ for week in weeks:
         lines = [f"**{daynum}일**"]
         if fixed_list:
             lines.append(f"- 고정비: {fixed_sum:,.0f}원")
-            for e in fixed_list[:5]:
+            for e in fixed_list[:6]:
                 lines.append(f"  - {e.item} {e.amount:,.0f}")
-            if len(fixed_list) > 5:
-                lines.append(f"  - …(+{len(fixed_list)-5}개)")
+            if len(fixed_list) > 6:
+                lines.append(f"  - …(+{len(fixed_list)-6}개)")
 
         if spent_list:
             lines.append(f"- 입력지출: {spent_sum:,.0f}원")
-            for c, a, m in spent_list[:5]:
+            for c, a, m in spent_list[:6]:
                 m = m if m else ""
                 lines.append(f"  - [{c}] {a:,.0f} {m}")
-            if len(spent_list) > 5:
-                lines.append(f"  - …(+{len(spent_list)-5}건)")
+            if len(spent_list) > 6:
+                lines.append(f"  - …(+{len(spent_list)-6}건)")
 
-        # 간단한 경고(선택): 하루 0원이면 표시 안 함
         box_color = "#fff7e6" if fixed_list else "#ffffff"
         cols[i].markdown(
             f"<div style='height:150px; overflow:auto; border:1px solid #ddd; padding:8px; background:{box_color}; border-radius:8px;'>"
@@ -262,16 +378,15 @@ else:
     show["date"] = show["date"].dt.date
     st.dataframe(show, use_container_width=True, hide_index=True)
 
-    # 삭제 UI
-    st.caption("삭제하려면 아래에서 행 번호를 선택 후 삭제 버튼을 누르세요.")
+    st.caption("삭제하려면 아래에서 행을 선택 후 삭제 버튼을 누르세요.")
     idxs = st.multiselect(
-        "삭제할 행 선택(표의 순서 기준)",
+        "삭제할 행 선택",
         options=list(show.index),
         format_func=lambda i: f"{show.loc[i,'date']} / {show.loc[i,'category']} / {show.loc[i,'amount']:,}원 / {show.loc[i,'memo']}"
     )
     if st.button("선택한 행 삭제"):
         st.session_state.df = st.session_state.df.drop(index=idxs).reset_index(drop=True)
-        st.success("삭제 완료! (상단 월 선택 유지)")
+        st.success("삭제 완료!")
         st.rerun()
 
-st.caption("※ 팁: 클라우드로 쓸 때는 'CSV 다운로드'로 백업해두면 데이터가 안전해요.")
+st.caption("※ 팁: 지출은 CSV로 주기적으로 백업해두면 안전해요. 고정비는 '고정비 저장'을 누른 뒤 달력 반영을 확인하세요.")
