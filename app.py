@@ -94,7 +94,8 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
 def load_fixed_events() -> List[Event]:
     data = load_json(FIXED_FILE, [])
     if data:
-        return [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"]), item=r["item"], amount=r["amount"], note=r.get("note","")] for r in data]
+        # [수정 완료] SyntaxError 발생했던 괄호 오타 수정
+        return [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"], note=r.get("note","")) for r in data]
     base = build_fixed_events()
     save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in base])
     return base
@@ -192,7 +193,9 @@ while curr <= budget_end:
     date_list.append(curr); curr += dt.timedelta(days=1)
 start_weekday = budget_start.weekday()
 full_grid = [None] * start_weekday + date_list
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid + [None] * ((7 - len(full_grid) % 7) % 7)), 7)]
+padding = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 # 주간 식비 및 정산 계산
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
@@ -236,7 +239,6 @@ with st.expander("➕ 지출 추가하기", expanded=True):
 st.markdown(f"### 📊 자금 흐름 현황 (기간: {budget_start.strftime('%m/%d')} ~ {budget_end.strftime('%m/%d')})")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
-# [수정] 총 현금 자산에 비상금 인출로 인한 감소분(붉은색 하향 화살표) 표시
 m2.metric("💰 총 현금 자산 (파킹)", f"{st.session_state.cash_data['total_balance']:,.0f}원", delta=f"- {withdrawal:,.0f} (비상금)" if withdrawal > 0 else None, delta_color="normal")
 m3.metric("✅ 나간 고정비", f"{paid_fixed_sum:,.0f}원")
 m4.metric("⏳ 남은 고정비", f"{rem_fixed_sum:,.0f}원")
@@ -316,6 +318,7 @@ for week in weeks:
             cell_html.append(f"<div style='color:#3498db; font-size:13px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
             for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {m if m else c} ({a:,.0f})</div>")
         
+        cell_html.append("</div>")
         border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
         cols[idx].markdown(f"<div style='height:280px; border: {border_style}; padding:8px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
