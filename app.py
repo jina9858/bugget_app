@@ -13,7 +13,7 @@ st.set_page_config(page_title="예산 달력", layout="wide")
 st.markdown("""
     <style>
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
-        h1 { font-size: 26px !important; }
+        h1 { font-size: 18px !important; }
         
         /* [수정됨] 줄바꿈 방지를 위해 h3(자금흐름현황 등) 기본 사이즈 지정 */
         h3 { font-size: 22px !important; }
