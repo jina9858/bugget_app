@@ -94,14 +94,13 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
 def load_fixed_events() -> List[Event]:
     data = load_json(FIXED_FILE, [])
     if data:
-        # [수정 완료] SyntaxError 발생했던 괄호 오타 수정
         return [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"], note=r.get("note","")) for r in data]
     base = build_fixed_events()
     save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in base])
     return base
 
 # -----------------------------
-# 2. 세션 상태 및 오늘 날짜 (2026-02-24)
+# 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
 # -----------------------------
 actual_today = dt.date(2026, 2, 24)
 
@@ -133,8 +132,7 @@ budget_end = st.sidebar.date_input(f"🏁 예산 종료일", value=dt.date.fromi
 
 if budget_start.isoformat() != saved_dates.get("start") or budget_end.isoformat() != saved_dates.get("end"):
     st.session_state.ref_dates[month_key] = {"start": budget_start.isoformat(), "end": budget_end.isoformat()}
-    save_json(REF_DATE_FILE, st.session_state.ref_dates)
-    st.rerun()
+    save_json(REF_DATE_FILE, st.session_state.ref_dates); st.rerun()
 
 st.sidebar.markdown("---")
 food_budget_total = st.sidebar.number_input("🍔 월 식비 총 예산", min_value=0, value=650000, step=10000)
@@ -157,8 +155,7 @@ if st.sidebar.button("💰 자산 현황 업데이트"):
     diff = (monthly_savings - old_data.get("savings", 0)) - (withdrawal - old_data.get("withdrawal", 0))
     st.session_state.cash_data["total_balance"] += diff
     st.session_state.cash_data["monthly"][month_key] = {"savings": monthly_savings, "withdrawal": withdrawal, "withdrawal_date": withdrawal_date.isoformat()}
-    save_json(CASH_ASSETS_FILE, st.session_state.cash_data)
-    st.rerun()
+    save_json(CASH_ASSETS_FILE, st.session_state.cash_data); st.rerun()
 
 # -----------------------------
 # 3. 데이터 집계 및 계산
@@ -178,26 +175,20 @@ rem_fixed_sum = sum(e.amount for e in period_fixed_events if e.date > actual_tod
 total_fixed = paid_fixed_sum + rem_fixed_sum
 v_period_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]
 
-# 현재 가용 잔액 계산: 월수입 - 파킹 - 고정비 (+ 이월금 + 인출) - 실제 지출
 total_budgetable = cur_inc - monthly_savings - total_fixed + monthly_carry_over + withdrawal
 total_balance = total_budgetable - int(v_period_df["amount"].sum())
-
-# 자금 설계 진단용 계획 총액
 total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_total
 adequacy = total_budgetable - total_planned
 
-# 달력 그리드 생성
+# 달력 그리드 및 주간 식비 정산
 date_list = []
 curr = budget_start
 while curr <= budget_end:
     date_list.append(curr); curr += dt.timedelta(days=1)
 start_weekday = budget_start.weekday()
 full_grid = [None] * start_weekday + date_list
-padding = (7 - (len(full_grid) % 7)) % 7
-full_grid += [None] * padding
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid + [None] * ((7 - len(full_grid) % 7) % 7)), 7)]
 
-# 주간 식비 및 정산 계산
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
 used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].sum())
@@ -221,6 +212,9 @@ for week_row in weeks:
         "other": other_budget_total - int(cum_spent_df[cum_spent_df["category"] == "기타"]["amount"].sum()),
         "em": em_budget_total - int(cum_spent_df[cum_spent_df["category"] == "예비비"]["amount"].sum())
     }
+
+# 항목별 현재 남은 총 금액 계산
+total_remaining_budget = total_food_surplus_deficit + (hh_budget_total - used_hh) + (tr_budget_total - used_tr) + (other_budget_total - used_other) + (em_budget_total - used_em)
 
 # ---------- Main (대시보드) ----------
 st.title(f"📅 {selected_month}월 예산 달력")
@@ -254,13 +248,16 @@ d2.write(f"📝 계획한 예산 총합: **{total_planned:,.0f}원**")
 d3.info(f"💡 결과: 현재 계획상 **{abs(adequacy):,.0f}원**이 {'남습니다' if adequacy >= 0 else '부족합니다'}.")
 
 st.markdown("---")
+# [수정] 항목별 예산 및 정산 현황 (총합 메트릭 추가)
 st.markdown("### 🎯 항목별 예산 및 정산 현황")
-b1, b2, b3, b4, b5 = st.columns(5)
+b1, b2, b3, b4, b5, b6 = st.columns(6)
 b1.metric("🍔 식비 예산", f"{food_budget_total:,.0f}원", delta=f"{total_food_surplus_deficit:,.0f}원 (정산)")
 b2.metric("🧺 생활용품", f"{hh_budget_total:,.0f}원", delta=f"{(hh_budget_total - used_hh):,.0f}원 (정산)")
 b3.metric("🚗 차량/교통", f"{tr_budget_total:,.0f}원", delta=f"{(tr_budget_total - used_tr):,.0f}원 (정산)")
 b4.metric("➕ 기타 예산", f"{other_budget_total:,.0f}원", delta=f"{(other_budget_total - used_other):,.0f}원 (정산)")
 b5.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{(em_budget_total - used_em):,.0f}원 (정산)")
+# [추가] 정산 총합 표시
+b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", delta="정산 총합", delta_color="off")
 
 # -----------------------------
 # 5. 지출 달력
@@ -281,19 +278,13 @@ for week in weeks:
     for idx, current_date in enumerate(week):
         if current_date is None:
             cols[idx].markdown("<div style='height:280px; background:#f9f9f9; border:1px solid #eee; border-radius:8px;'></div>", unsafe_allow_html=True); continue
-        
         is_today = (current_date == actual_today)
         cell_html = [f"<div class='cal-content'><div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
-        # [복구] 비상금 인출 표시 (빨간색 배경)
         w_info = st.session_state.cash_data["monthly"].get(month_key, {})
-        if w_info.get("withdrawal", 0) > 0:
-            try:
-                if dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date:
-                    cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:5px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
-            except: pass
+        if w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date:
+            cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:5px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
 
-        # 일요일 정산 표시
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_balances:
                 b = weekly_balances[current_date]
@@ -316,11 +307,9 @@ for week in weeks:
             for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:11px;'>· {e.item} ({e.amount:,.0f})</div>")
         if day_spent:
             cell_html.append(f"<div style='color:#3498db; font-size:13px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
-            for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {m if m else c} ({a:,.0f})</div>")
+            for c, a, m in day_spent: cell_html.append(f"<div style='color:#2980b9; font-size:11px;'>· {m if m else c} ({a:,.0f})</div>")
         
-        cell_html.append("</div>")
-        border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
-        cols[idx].markdown(f"<div style='height:280px; border: {border_style}; padding:8px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
+        cols[idx].markdown(f"<div style='height:280px; border: {'4px solid #ccff00' if is_today else '1px solid #ddd'}; padding:8px; background:{'#fff4f4' if day_fixed else '#ffffff'}; border-radius:{'20px' if is_today else '8px'}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
 # -----------------------------
 # 6. 상세 지출 내역 관리
