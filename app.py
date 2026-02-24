@@ -106,14 +106,7 @@ if "df" not in st.session_state:
 
 # ---------- Sidebar ----------
 st.sidebar.header("⚙️ 기준 설정")
-
-# [핵심] 실행 날짜 설정 (시뮬레이션용)
-simulated_today = st.sidebar.date_input(
-    "🗓️ 기준 날짜 설정 (오늘)", 
-    value=dt.date.today(),
-    help="이 날짜를 기준으로 주간 예산 차감 및 현재 주차가 결정됩니다."
-)
-
+simulated_today = st.sidebar.date_input("🗓️ 기준 날짜 설정 (오늘)", value=dt.date(2026, 2, 24))
 selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
 
 st.sidebar.markdown("---")
@@ -131,6 +124,11 @@ with st.sidebar.expander("📝 수입/고정비 수정"):
 
 # ---------- Main ----------
 st.title(f"📅 {YEAR}년 {selected_month}월 예산 달력")
+
+# [과거 달력 숨김 로직]
+if simulated_today.year == YEAR and selected_month < simulated_today.month:
+    st.warning(f"선택하신 {selected_month}월은 이미 지난 달입니다. 기준 날짜({simulated_today.month}월) 이후의 달력만 조회 가능합니다.")
+    st.stop()
 
 # 지출 입력
 with st.expander("➕ 지출 추가하기", expanded=True):
@@ -150,7 +148,7 @@ with st.expander("➕ 지출 추가하기", expanded=True):
 # -----------------------------
 df = st.session_state.df.copy()
 
-# [월간 이월금 계산]
+# 월간 이월금 계산
 monthly_carry_over = 0
 for m in range(START_MONTH, selected_month):
     m_inc = st.session_state.income_data.get(f"{YEAR}-{m:02d}", 0)
@@ -165,27 +163,29 @@ f_total = sum(e.amount for e in cur_fixed_list)
 v_total = int(m_df["amount"].sum())
 total_balance = cur_inc - f_total - v_total + monthly_carry_over
 
-# [주간 식비 계산]
-total_days = last_day(YEAR, selected_month)
-week_ranges = [(1, 7), (8, 14), (15, 21), (22, total_days)]
-weekly_food_base = food_budget_total / len(week_ranges)
+# [주간 식비 계산 로직 - 실제 달력 주차 기준]
+cal_obj = calendar.Calendar(firstweekday=0)
+weeks_list = cal_obj.monthdayscalendar(YEAR, selected_month)
+num_weeks = len(weeks_list)
+weekly_food_base = food_budget_total / num_weeks
 
-weekly_food_results = {}
+weekly_food_balances = {}
 food_carry = 0
-# 설정한 기준 날짜(simulated_today)를 사용하여 현재 주차 판단
-today_day = simulated_today.day if (simulated_today.month == selected_month and simulated_today.year == YEAR) else 0
-current_week_info = None
-
-for i, (ws, we) in enumerate(week_ranges):
-    w_spent = int(m_df[(m_df["category"] == "식비") & (m_df["date"].dt.day >= ws) & (m_df["date"].dt.day <= we)]["amount"].sum())
+for week in weeks_list:
+    valid_days = [d for d in week if d > 0]
+    if not valid_days: continue
+    w_start, w_end = valid_days[0], valid_days[-1]
+    w_spent = int(m_df[(m_df["category"] == "식비") & (m_df["date"].dt.day >= w_start) & (m_df["date"].dt.day <= w_end)]["amount"].sum())
     w_available = weekly_food_base + food_carry
     w_balance = w_available - w_spent
-    weekly_food_results[we] = w_balance
-    if ws <= today_day <= we:
-        current_week_info = {"주차": f"{i+1}주차", "잔액": w_balance, "지출": w_spent}
+    
+    # 일요일(마지막 열)에 잔액 저장
+    sunday_day = week[6]
+    if sunday_day > 0: weekly_food_balances[sunday_day] = w_balance
+    else: weekly_food_balances[w_end] = w_balance
     food_carry = w_balance
 
-# [예비비 잔액 계산]
+# 예비비 잔액 계산
 spent_em_total = int(m_df[m_df["category"] == "예비비"]["amount"].sum())
 rem_em_monthly = em_budget_total - spent_em_total
 
@@ -193,8 +193,7 @@ rem_em_monthly = em_budget_total - spent_em_total
 # 4. 상단 대시보드
 # -----------------------------
 st.markdown("### 📊 종합 예산 현황")
-# 기준 날짜 안내
-st.caption(f"📍 현재 기준 날짜: {simulated_today.strftime('%Y년 %m월 %d일')}")
+st.caption(f"📍 현재 기준 날짜: {simulated_today.strftime('%Y-%m-%d')}")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
 m2.metric("고정비", f"{f_total:,.0f}원")
@@ -202,24 +201,12 @@ m3.metric("변동지출", f"{v_total:,.0f}원")
 m4.metric("지난달 이월", f"{monthly_carry_over:,.0f}원", delta=monthly_carry_over)
 m5.metric("최종 잔액", f"{total_balance:,.0f}원")
 
-# --- 식비 주간 이월 현황 ---
-st.markdown("---")
-st.markdown("### 🍞 식비 주간 이월 관리")
-if current_week_info:
-    c1, c2 = st.columns(2)
-    c1.metric(f"이번 주({current_week_info['주차']}) 식비 잔액", f"{current_week_info['잔액']:,.0f}원", delta=current_week_info['잔액'])
-    with st.expander("📅 주차별 상세 식비 흐름 보기"):
-        st.table(pd.DataFrame([{"주차": f"{i+1}주차", "잔액": v} for i, v in enumerate(weekly_food_results.values())]))
-else:
-    st.info("선택한 월이 기준 날짜와 일치하지 않아 주간 현황이 표시되지 않습니다.")
-
 # -----------------------------
-# 5. 지출 달력 (상세 내역 + 잔액 표시)
+# 5. 지출 달력
 # -----------------------------
 st.markdown("---")
 st.subheader("🗓️ 지출 달력")
-cal_obj = calendar.Calendar(firstweekday=0)
-weeks_list = cal_obj.monthdayscalendar(YEAR, selected_month)
+st.caption("💡 **식비 잔액**은 일요일에만 표시되며, **예비비 잔액**은 매일 하단에 표시됩니다.")
 
 f_date_map = {}; s_date_map = {}
 for e in cur_fixed_list: f_date_map.setdefault(e.date.day, []).append(e)
@@ -241,39 +228,55 @@ for week in weeks_list:
         sum_fixed = sum(e.amount for e in day_fixed)
         sum_spent = sum(a for _, a, _ in day_spent)
         
-        # 오늘 날짜 하이라이트
         is_today = (day_num == simulated_today.day and selected_month == simulated_today.month)
         today_style = "border: 2px solid #2ecc71;" if is_today else "border: 1px solid #ddd;"
         
-        cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'}; margin-bottom:5px;'>{day_num} {'(오늘)' if is_today else ''}</div>"]
+        cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{day_num}</div>"]
         
         if day_fixed:
             cell_html.append(f"<div style='color:#e74c3c; font-size:11px; font-weight:bold;'>고정: {sum_fixed:,.0f}</div>")
-            for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item} ({e.amount:,.0f})</div>")
+            for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item}</div>")
         if day_spent:
             cell_html.append(f"<div style='color:#3498db; font-size:11px; font-weight:bold; margin-top:5px;'>변동: {sum_spent:,.0f}</div>")
             for c, a, m in day_spent:
                 txt = m if m else c
                 cell_html.append(f"<div style='color:#2980b9; font-size:10px;'>· {txt} ({a:,.0f})</div>")
         
-        # 잔액 표시 (주간 식비 / 월 예비비)
         footer_html = []
-        if day_num in weekly_food_results:
-            w_bal = weekly_food_results[day_num]
-            footer_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:11px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 주간 잔액: {w_bal:,.0f}</div>")
+        if idx == 6 and day_num in weekly_food_balances:
+            w_bal = weekly_food_balances[day_num]
+            footer_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:11px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 식비잔액: {w_bal:,.0f}</div>")
         footer_html.append(f"<div style='margin-top:5px; font-size:10px; color:#7f8c8d; text-align:right;'>🚨 예비비: {rem_em_monthly:,.0f}</div>")
         
         cell_html.append("".join(footer_html))
-        
         bg_color = "#ffffff" if not day_fixed else "#fff4f4"
-        cols[idx].markdown(f"""
-            <div style="height:200px; {today_style} padding:8px; background:{bg_color}; border-radius:8px; overflow-y:auto;">
-                {"".join(cell_html)}
-            </div>
-        """, unsafe_allow_html=True)
+        cols[idx].markdown(f"<div style='height:200px; {today_style} padding:8px; background:{bg_color}; border-radius:8px; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
-# 상세 내역
+# -----------------------------
+# 6. 상세 지출 내역 관리 (복구 완료!)
+# -----------------------------
 st.markdown("---")
-st.subheader("📜 상세 지출 내역")
+st.subheader("📜 이번 달 상세 지출 내역")
 if not m_df.empty:
-    st.dataframe(m_df.assign(date=m_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
+    # 1. 수정 기능: data_editor를 사용하여 표에서 직접 수정 가능
+    st.info("💡 아래 표에서 내용을 직접 클릭하여 수정할 수 있습니다.")
+    edited_m_df = st.data_editor(
+        m_df.assign(date=m_df["date"].dt.date).sort_values("date"),
+        use_container_width=True,
+        hide_index=True,
+        key="main_expense_editor"
+    )
+    
+    # 2. 삭제 기능: 멀티셀렉트와 버튼 사용
+    with st.expander("🗑️ 지출 항목 삭제", expanded=False):
+        to_del = st.multiselect(
+            "삭제할 항목을 선택하세요 (여러 개 선택 가능)", 
+            options=list(m_df.index), 
+            format_func=lambda x: f"{m_df.loc[x,'date'].date()} | {m_df.loc[x,'memo']} | {m_df.loc[x,'amount']:,}원"
+        )
+        if st.button("선택한 항목 삭제"):
+            st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
+            st.success("성공적으로 삭제되었습니다!")
+            st.rerun()
+else:
+    st.info("이번 달에 입력된 지출 내역이 없습니다.")
