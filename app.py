@@ -26,16 +26,16 @@ st.markdown("""
         @media screen and (max-width: 600px) {
             h1 { font-size: 20px !important; margin-bottom: 5px !important; }
             /* 모바일 화면일 때만 3개 타이틀(h3) 사이즈를 14px로 줄이고 자간을 좁혀 한 줄에 쏙 들어가게 함 */
-            h3 { font-size: 14px !important; letter-spacing: -0.5px !important; }
+            h3 { font-size: 18px !important; letter-spacing: -0.5px !important; }
         }
 
         /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
         .cal-content {
-            font-size: 14px !important;
+            font-size: 18px !important;
             line-height: 1.4;
         }
         [data-testid="stMetricValue"] {
-            font-size: 14px !important;
+            font-size: 18px !important;
         }
         
         /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
