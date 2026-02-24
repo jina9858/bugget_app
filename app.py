@@ -107,8 +107,8 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
-# ---------- Sidebar ----------
-st.sidebar.header("⚙️ 예산 기간 설정")
+# ---------- Sidebar (항목별 예산 설정) ----------
+st.sidebar.header("⚙️ 예산 설정")
 st.sidebar.info(f"✨ 실제 오늘: {actual_today.strftime('%Y-%m-%d')}")
 
 selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
@@ -127,8 +127,11 @@ if budget_start.isoformat() != saved_dates.get("start") or budget_end.isoformat(
     st.rerun()
 
 st.sidebar.markdown("---")
-food_budget_total = st.sidebar.number_input("월 식비 총 예산", min_value=0, value=650000, step=10000)
-em_budget_total = st.sidebar.number_input("월 예비비 총 예산", min_value=0, value=200000, step=10000)
+# [사용자 요청] 4가지 세부 예산 입력
+food_budget_total = st.sidebar.number_input("🍔 월 식비 총 예산", min_value=0, value=650000, step=10000)
+household_budget_total = st.sidebar.number_input("🧺 월 생활용품 예산", min_value=0, value=100000, step=10000)
+transport_budget_total = st.sidebar.number_input("🚗 월 차량/교통 예산", min_value=0, value=150000, step=10000)
+em_budget_total = st.sidebar.number_input("🚨 월 예비비 예산", min_value=0, value=200000, step=10000)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🅿️ 현금 자산 (파킹) 관리")
@@ -166,7 +169,7 @@ st.title(f"📅 {selected_month}월 예산 달력")
 with st.expander("➕ 지출 추가하기", expanded=True):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
     with c1: d = st.date_input("날짜", value=budget_start)
-    with c2: cat = st.selectbox("분류", ["식비", "예비비", "생활용품", "교통/차량", "기타"])
+    with c2: cat = st.selectbox("분류", ["식비", "생활용품", "교통/차량", "예비비", "기타"])
     with c3: memo = st.text_input("내용")
     with c4: amt = st.number_input("금액(원)", min_value=0, step=1000)
     if st.button("지출 추가"):
@@ -190,10 +193,10 @@ cur_inc = st.session_state.income_data.get(month_key, 0)
 period_fixed_events = [e for e in st.session_state.fixed_events if budget_start <= e.date <= budget_end]
 paid_fixed_sum = sum(e.amount for e in period_fixed_events if e.date <= actual_today)
 rem_fixed_sum = sum(e.amount for e in period_fixed_events if e.date > actual_today)
-v_period_total = int(df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
-total_balance = cur_inc - monthly_savings - (paid_fixed_sum + rem_fixed_sum) - v_period_total + monthly_carry_over + withdrawal
+v_period_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]
+total_balance = cur_inc - monthly_savings - (paid_fixed_sum + rem_fixed_sum) - int(v_period_df["amount"].sum()) + monthly_carry_over + withdrawal
 
-# [연속 달력 그리드 생성]
+# 달력 그리드 생성
 date_list = []
 curr = budget_start
 while curr <= budget_end:
@@ -206,7 +209,7 @@ padding = (7 - (len(full_grid) % 7)) % 7
 full_grid += [None] * padding
 weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
-# [핵심] 식비 주차별 균등 배분 계산 (정확히 n/1로 나누어 이월)
+# [핵심] 항목별 잔액 계산 로직
 weekly_food_base = food_budget_total / len(weeks)
 weekly_food_balances = {}
 food_carry = 0
@@ -216,20 +219,24 @@ for week_row in weeks:
     if not valid: continue
     ws, we = valid[0], valid[-1]
     
-    # 해당 주차 동안의 식비 지출 합산
-    w_spent = int(df[(df["category"] == "식비") & (df["date"].dt.date >= ws) & (df["date"].dt.date <= we)]["amount"].sum())
+    # 해당 주차 식비 지출
+    w_food_spent = int(v_period_df[(v_period_df["category"] == "식비") & (v_period_df["date"].dt.date >= ws) & (v_period_df["date"].dt.date <= we)]["amount"].sum())
+    w_food_bal = (weekly_food_base + food_carry) - w_food_spent
     
-    # 이번 주 가용 예산 = (전체 주차별 균등 금액) + (지난주에서 넘어온 잔액)
-    w_balance = (weekly_food_base + food_carry) - w_spent
+    # 주차별 누적 지출 (생활용품, 교통, 예비비)
+    cum_spent_df = v_period_df[v_period_df["date"].dt.date <= we]
+    rem_hh = household_budget_total - int(cum_spent_df[cum_spent_df["category"] == "생활용품"]["amount"].sum())
+    rem_tr = transport_budget_total - int(cum_spent_df[cum_spent_df["category"] == "교통/차량"]["amount"].sum())
+    rem_em = em_budget_total - int(cum_spent_df[cum_spent_df["category"] == "예비비"]["amount"].sum())
     
-    # 일요일 칸 또는 기간 마지막 날에 잔액 매핑
     target_date = week_row[6] if (len(week_row) > 6 and week_row[6]) else we
-    weekly_food_balances[target_date] = w_balance
-    
-    # 남은 금액을 다음 주로 이월
-    food_carry = w_balance
-
-rem_em_in_period = em_budget_total - int(df[(df["category"] == "예비비") & (df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]["amount"].sum())
+    weekly_food_balances[target_date] = {
+        "food": w_food_bal,
+        "household": rem_hh,
+        "transport": rem_tr,
+        "reserve": rem_em
+    }
+    food_carry = w_food_bal
 
 # -----------------------------
 # 4. 상단 대시보드
@@ -255,25 +262,33 @@ for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
 
 f_date_map = {}; s_date_map = {}
 for e in period_fixed_events: f_date_map.setdefault(e.date, []).append(e)
-period_spent_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]
-for _, r in period_spent_df.iterrows():
+for _, r in v_period_df.iterrows():
     s_date_map.setdefault(r["date"].date(), []).append((r["category"], r["amount"], r["memo"]))
 
 for week in weeks:
     cols = st.columns(7)
     for idx, current_date in enumerate(week):
         if current_date is None:
-            cols[idx].markdown("<div style='height:200px; background:#f9f9f9; border:1px solid #eee; border-radius:8px;'></div>", unsafe_allow_html=True)
+            cols[idx].markdown("<div style='height:240px; background:#f9f9f9; border:1px solid #eee; border-radius:8px;'></div>", unsafe_allow_html=True)
             continue
         
         is_today = (current_date == actual_today)
         cell_html = [f"<div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
-        # 일요일(idx 6)에만 주간 잔액 표시
+        # [사용자 요청] 일요일에 모든 잔액 표시
         if idx == 6 or current_date == budget_end:
             if current_date in weekly_food_balances:
-                cell_html.append(f"<div style='margin-bottom:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 식비: {weekly_food_balances[current_date]:,.0f} | 🚨 예비: {rem_em_in_period:,.0f}</div>")
+                bals = weekly_food_balances[current_date]
+                cell_html.append(f"""
+                <div style='margin-bottom:10px; padding:5px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; line-height:1.4;'>
+                    🍞 식비잔액: {bals['food']:,.0f}<br>
+                    🧺 생활용품: {bals['household']:,.0f}<br>
+                    🚗 차량/교통: {bals['transport']:,.0f}<br>
+                    🚨 예비비: {bals['reserve']:,.0f}
+                </div>
+                """)
 
+        # 비상금 인출 표시
         w_info = st.session_state.cash_data["monthly"].get(month_key, {})
         if w_info.get("withdrawal", 0) > 0:
             try:
@@ -295,17 +310,17 @@ for week in weeks:
         border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
         radius_style = "20px" if is_today else "8px"
         bg_color = "#fff4f4" if day_fixed else "#ffffff"
-        cols[idx].markdown(f"<div style='height:200px; border: {border_style}; padding:8px; background:{bg_color}; border-radius:{radius_style}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
+        cols[idx].markdown(f"<div style='height:240px; border: {border_style}; padding:8px; background:{bg_color}; border-radius:{radius_style}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
 
 # -----------------------------
 # 6. 상세 지출 내역 관리
 # -----------------------------
 st.markdown("---")
 st.subheader("📜 기간 상세 지출 내역")
-if not period_spent_df.empty:
-    st.data_editor(period_spent_df.assign(date=period_spent_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
+if not v_period_df.empty:
+    st.data_editor(v_period_df.assign(date=v_period_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
     with st.expander("🗑️ 지출 항목 삭제", expanded=False):
-        to_del = st.multiselect("삭제할 항목 선택", options=list(period_spent_df.index), format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
+        to_del = st.multiselect("삭제할 항목 선택", options=list(v_period_df.index), format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
             st.rerun()
