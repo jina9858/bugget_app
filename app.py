@@ -13,9 +13,9 @@ st.set_page_config(page_title="예산 달력", layout="wide")
 st.markdown("""
     <style>
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
-        h1 { font-size: 20px !important; }
+        h1 { font-size: 16px !important; }
         @media screen and (max-width: 600px) {
-            h1 { font-size: 20px !important; margin-bottom: 5px !important; }
+            h1 { font-size: 16px !important; margin-bottom: 5px !important; }
         }
 
         /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
@@ -24,7 +24,7 @@ st.markdown("""
             line-height: 1.4;
         }
         [data-testid="stMetricValue"] {
-            font-size: 22px !important;
+            font-size: 16px !important;
         }
         
         /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
