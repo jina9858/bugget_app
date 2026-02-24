@@ -17,6 +17,7 @@ END_MONTH = 6
 INCOME_FILE = "income_data.json"
 FIXED_FILE = "fixed_events.json"
 REF_DATE_FILE = "ref_dates.json"
+CASH_ASSETS_FILE = "cash_assets.json" # 현금 자산 저장 파일
 
 # -----------------------------
 # 1. 데이터 관리 로직
@@ -84,8 +85,11 @@ def load_fixed_events() -> List[Event]:
     if data:
         return [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"], note=r.get("note","")) for r in data]
     base = build_fixed_events()
-    save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in base])
+    save_fixed_events(base)
     return base
+
+def save_fixed_events(events: List[Event]):
+    save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in events])
 
 # -----------------------------
 # 2. 세션 상태 관리
@@ -96,6 +100,8 @@ if "fixed_events" not in st.session_state:
     st.session_state.fixed_events = load_fixed_events()
 if "ref_dates" not in st.session_state:
     st.session_state.ref_dates = load_json(REF_DATE_FILE, {f"{YEAR}-{m:02d}": f"{YEAR}-{m:02d}-24" for m in range(START_MONTH, END_MONTH + 1)})
+if "cash_data" not in st.session_state:
+    st.session_state.cash_data = load_json(CASH_ASSETS_FILE, {"total_balance": 0, "monthly": {}})
 if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
@@ -106,47 +112,54 @@ st.sidebar.header("⚙️ 예산 관리 및 설정")
 selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
 month_key = f"{YEAR}-{selected_month:02d}"
 
+# 1. 월별 기준 날짜 설정
 current_ref_date_str = st.session_state.ref_dates.get(month_key, f"{YEAR}-{selected_month:02d}-01")
-simulated_today = st.sidebar.date_input(
-    f"🗓️ {selected_month}월 기준 날짜 설정", 
-    value=dt.date.fromisoformat(current_ref_date_str),
-    key=f"ref_date_{selected_month}"
-)
+simulated_today = st.sidebar.date_input(f"🗓️ {selected_month}월 기준 날짜", value=dt.date.fromisoformat(current_ref_date_str))
 if simulated_today.isoformat() != current_ref_date_str:
     st.session_state.ref_dates[month_key] = simulated_today.isoformat()
     save_json(REF_DATE_FILE, st.session_state.ref_dates)
     st.rerun()
 
+# 2. 예산 설정
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🎯 예산 설정")
 food_budget_total = st.sidebar.number_input("월 식비 총 예산", min_value=0, value=650000, step=10000)
 em_budget_total = st.sidebar.number_input("월 예비비 총 예산", min_value=0, value=200000, step=10000)
+
+# 3. [추가] 현금 자산 (파킹) 관리
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🅿️ 현금 자산 (파킹) 관리")
+cash_month_data = st.session_state.cash_data["monthly"].get(month_key, {"savings": 0, "withdrawal": 0})
+
+monthly_savings = st.sidebar.number_input("이번 달 파킹(저금)", min_value=0, value=cash_month_data["savings"], step=10000)
+withdrawal = st.sidebar.number_input("비상금 인출", min_value=0, value=cash_month_data["withdrawal"], step=10000)
+
+if st.sidebar.button("💰 자산 현황 업데이트"):
+    diff = (monthly_savings - cash_month_data["savings"]) - (withdrawal - cash_month_data["withdrawal"])
+    st.session_state.cash_data["total_balance"] += diff
+    st.session_state.cash_data["monthly"][month_key] = {"savings": monthly_savings, "withdrawal": withdrawal}
+    save_json(CASH_ASSETS_FILE, st.session_state.cash_data)
+    st.success("자산 현황이 업데이트되었습니다!")
+    st.rerun()
 
 with st.sidebar.expander("📝 수입 및 고정비 항목 수정", expanded=False):
     st.markdown("#### 💰 월별 수입")
     income_df = pd.DataFrame([{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()])
-    edited_inc = st.data_editor(income_df, use_container_width=True, hide_index=True, key="inc_editor")
-    
-    st.markdown("#### 🛠️ 고정비 항목 (전체)")
+    edited_inc = st.data_editor(income_df, use_container_width=True, hide_index=True)
+    st.markdown("#### 🛠️ 고정비 항목")
     fixed_df = pd.DataFrame([{"date": e.date.isoformat(), "item": e.item, "amount": e.amount, "category": e.category} for e in st.session_state.fixed_events])
-    edited_fixed = st.data_editor(fixed_df, use_container_width=True, num_rows="dynamic", key="fixed_editor")
-    
+    edited_fixed = st.data_editor(fixed_df, use_container_width=True, num_rows="dynamic")
     if st.button("💾 모든 변경사항 저장"):
         st.session_state.income_data = dict(zip(edited_inc["월"], edited_inc["수입(원)"]))
         save_json(INCOME_FILE, st.session_state.income_data)
         new_fixed = [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"]) for r in edited_fixed.to_dict(orient="records")]
         st.session_state.fixed_events = new_fixed
-        save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount} for e in new_fixed])
-        st.success("저장되었습니다!")
+        save_fixed_events(new_fixed)
         st.rerun()
 
 # ---------- Main ----------
 st.title(f"📅 {YEAR}년 {selected_month}월 예산 달력")
 
-if simulated_today.year == YEAR and selected_month < simulated_today.month:
-    st.warning(f"선택하신 {selected_month}월은 이미 지난 달입니다. 기준 날짜({simulated_today.month}월) 이후의 달력만 조회 가능합니다.")
-    st.stop()
-
+# 지출 입력
 with st.expander("➕ 지출 추가하기", expanded=True):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
     with c1: d = st.date_input("날짜", value=dt.date(YEAR, selected_month, 1))
@@ -163,7 +176,6 @@ with st.expander("➕ 지출 추가하기", expanded=True):
 # 3. 데이터 집계 및 계산
 # -----------------------------
 df = st.session_state.df.copy()
-
 monthly_carry_over = 0
 for m in range(START_MONTH, selected_month):
     m_inc = st.session_state.income_data.get(f"{YEAR}-{m:02d}", 0)
@@ -175,13 +187,15 @@ m_df_full = df[(df["date"].dt.year == YEAR) & (df["date"].dt.month == selected_m
 cur_inc = st.session_state.income_data.get(month_key, 0)
 f_total_to_date = sum(e.amount for e in st.session_state.fixed_events if e.date.year == YEAR and e.date.month == selected_month and e.date <= simulated_today)
 v_total_to_date = int(m_df_full[m_df_full["date"].dt.date <= simulated_today]["amount"].sum())
-total_balance_to_date = cur_inc - f_total_to_date - v_total_to_date + monthly_carry_over
 
+# [핵심] 최종 잔액 계산: 저금액(savings)은 수입에서 제외, 인출금(withdrawal)은 가용 잔액에 포함
+total_balance_to_date = cur_inc - monthly_savings - f_total_to_date - v_total_to_date + monthly_carry_over + withdrawal
+
+# 주간 식비 계산
 cal_obj = calendar.Calendar(firstweekday=0)
 weeks_list = cal_obj.monthdayscalendar(YEAR, selected_month)
 weekly_food_base = food_budget_total / len(weeks_list)
-weekly_food_balances = {}
-food_carry = 0
+weekly_food_balances = {}; food_carry = 0
 for week in weeks_list:
     v_days = [d for d in week if d > 0]
     if not v_days: continue
@@ -199,19 +213,23 @@ rem_em_to_date = em_budget_total - int(m_df_full[(m_df_full["category"] == "예�
 # 4. 상단 대시보드
 # -----------------------------
 st.markdown(f"### 📊 {selected_month}월 예산 현황 (기준: {simulated_today.strftime('%m/%d')}까지)")
+
+# 비상금 인출 시 강력한 경고 표시 (사용자 요청)
+if withdrawal > 0:
+    st.error(f"🚨 비상금 인출 발생!! 이번 달 파킹 자산에서 {withdrawal:,.0f}원을 인출하여 잔액에 합산되었습니다. 🚨")
+
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("월 수입", f"{cur_inc:,.0f}원")
 m2.metric("고정비(발생)", f"{f_total_to_date:,.0f}원")
 m3.metric("변동지출(발생)", f"{v_total_to_date:,.0f}원")
-m4.metric("지난달 이월", f"{monthly_carry_over:,.0f}원", delta=monthly_carry_over)
-m5.metric("현재 잔액", f"{total_balance_to_date:,.0f}원")
+m4.metric("💰 총 현금 자산", f"{st.session_state.cash_data['total_balance']:,.0f}원", help="현재까지 파킹된 총 금액")
+m5.metric("현재 가용 잔액", f"{total_balance_to_date:,.0f}원", help="수입-저금-고정-변동+이월+인출")
 
 # -----------------------------
 # 5. 지출 달력
 # -----------------------------
 st.markdown("---")
 st.subheader("🗓️ 지출 달력")
-
 f_date_map = {}; s_date_map = {}
 for e in [x for x in st.session_state.fixed_events if x.date.year == YEAR and x.date.month == selected_month]:
     f_date_map.setdefault(e.date.day, []).append(e)
@@ -236,28 +254,21 @@ for week in weeks_list:
         if not is_past:
             day_fixed = f_date_map.get(day_num, [])
             day_spent = s_date_map.get(day_num, [])
-            
-            # [수정] 고정비 상세 내역 표시 시 개별 금액 추가
             if day_fixed:
                 cell_html.append(f"<div style='color:#e74c3c; font-size:11px; font-weight:bold;'>고정: {sum(e.amount for e in day_fixed):,.0f}</div>")
-                for e in day_fixed: 
-                    cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item} ({e.amount:,.0f})</div>")
-            
+                for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item} ({e.amount:,.0f})</div>")
             if day_spent:
                 cell_html.append(f"<div style='color:#3498db; font-size:11px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
                 for c, a, m in day_spent:
                     txt = m if m else c
                     cell_html.append(f"<div style='color:#2980b9; font-size:10px;'>· {txt} ({a:,.0f})</div>")
             
-            # [수정] 일요일(idx 6)에만 식비 및 예비비 잔액을 나란히 표시
             if idx == 6:
                 footer_parts = []
                 if day_num in weekly_food_balances:
                     footer_parts.append(f"🍞 식비: {weekly_food_balances[day_num]:,.0f}")
                 footer_parts.append(f"🚨 예비: {rem_em_to_date:,.0f}")
-                
-                combined_footer = " | ".join(footer_parts)
-                cell_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; text-align:center;'>{combined_footer}</div>")
+                cell_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; text-align:center;'>{' | '.join(footer_parts)}</div>")
         
         bg_color = "#ffffff" if not f_date_map.get(day_num, []) or is_past else "#fff4f4"
         today_style = "border: 2px solid #2ecc71;" if is_today else "border: 1px solid #ddd;"
@@ -269,12 +280,9 @@ for week in weeks_list:
 st.markdown("---")
 st.subheader("📜 이번 달 상세 지출 내역")
 if not m_df_full.empty:
-    st.info("💡 아래 표에서 내용을 직접 클릭하여 수정할 수 있습니다.")
     st.data_editor(m_df_full.assign(date=m_df_full["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
     with st.expander("🗑️ 지출 항목 삭제", expanded=False):
         to_del = st.multiselect("삭제할 항목 선택", options=list(m_df_full.index), format_func=lambda x: f"{m_df_full.loc[x,'date'].date()} | {m_df_full.loc[x,'memo']} | {m_df_full.loc[x,'amount']:,}원")
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
             st.rerun()
-else:
-    st.info("내역이 없습니다.")
