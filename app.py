@@ -73,8 +73,8 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
             if dday <= last_day(year, m):
                 events.append(Event(dt.date(year, m, dday), "보험", "메리츠 운전자보험", 10280))
         if m >= 3:
-            events.append(Event(dt.date(year, m, 13), "생활/구독", "네이버 멤버십", 4900),
-                          Event(dt.date(year, m, 24), "생활/구독", "AI 구독",      30000))
+            events.append(Event(dt.date(year, m, 13), "생활/구독", "네이버 멤버십", 4900))
+            events.append(Event(dt.date(year, m, 24), "생활/구독", "AI 구독",      30000))
         ld = dt.date(year, m, last_day(year, m))
         events.append(Event(next_monday_if_weekend(ld), "주거/공과금", "관리비", 110000))
     return [e for e in events if not (e.date.year == YEAR and e.date.month == 2 and e.date < feb_cutoff)]
@@ -100,14 +100,12 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
-# ---------- Sidebar (모든 수정 기능 여기!) ----------
+# ---------- Sidebar ----------
 st.sidebar.header("⚙️ 예산 관리 및 설정")
 
-# 월 선택
 selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
 month_key = f"{YEAR}-{selected_month:02d}"
 
-# 1. 월별 기준 날짜 설정
 current_ref_date_str = st.session_state.ref_dates.get(month_key, f"{YEAR}-{selected_month:02d}-01")
 simulated_today = st.sidebar.date_input(
     f"🗓️ {selected_month}월 기준 날짜 설정", 
@@ -119,14 +117,11 @@ if simulated_today.isoformat() != current_ref_date_str:
     save_json(REF_DATE_FILE, st.session_state.ref_dates)
     st.rerun()
 
-# 2. 예산 설정
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎯 예산 설정")
 food_budget_total = st.sidebar.number_input("월 식비 총 예산", min_value=0, value=650000, step=10000)
 em_budget_total = st.sidebar.number_input("월 예비비 총 예산", min_value=0, value=200000, step=10000)
 
-# 3. 데이터 편집 (수입 및 고정비 항목)
-st.sidebar.markdown("---")
 with st.sidebar.expander("📝 수입 및 고정비 항목 수정", expanded=False):
     st.markdown("#### 💰 월별 수입")
     income_df = pd.DataFrame([{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()])
@@ -137,20 +132,21 @@ with st.sidebar.expander("📝 수입 및 고정비 항목 수정", expanded=Fal
     edited_fixed = st.data_editor(fixed_df, use_container_width=True, num_rows="dynamic", key="fixed_editor")
     
     if st.button("💾 모든 변경사항 저장"):
-        # 수입 저장
         st.session_state.income_data = dict(zip(edited_inc["월"], edited_inc["수입(원)"]))
         save_json(INCOME_FILE, st.session_state.income_data)
-        # 고정비 저장
         new_fixed = [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"]) for r in edited_fixed.to_dict(orient="records")]
         st.session_state.fixed_events = new_fixed
         save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount} for e in new_fixed])
         st.success("저장되었습니다!")
         st.rerun()
 
-# ---------- Main (메인 화면) ----------
+# ---------- Main ----------
 st.title(f"📅 {YEAR}년 {selected_month}월 예산 달력")
 
-# 지출 입력
+if simulated_today.year == YEAR and selected_month < simulated_today.month:
+    st.warning(f"선택하신 {selected_month}월은 이미 지난 달입니다. 기준 날짜({simulated_today.month}월) 이후의 달력만 조회 가능합니다.")
+    st.stop()
+
 with st.expander("➕ 지출 추가하기", expanded=True):
     c1, c2, c3, c4 = st.columns([1.2, 1.0, 2.0, 1.0])
     with c1: d = st.date_input("날짜", value=dt.date(YEAR, selected_month, 1))
@@ -168,7 +164,6 @@ with st.expander("➕ 지출 추가하기", expanded=True):
 # -----------------------------
 df = st.session_state.df.copy()
 
-# 지난달 이월금
 monthly_carry_over = 0
 for m in range(START_MONTH, selected_month):
     m_inc = st.session_state.income_data.get(f"{YEAR}-{m:02d}", 0)
@@ -176,14 +171,12 @@ for m in range(START_MONTH, selected_month):
     m_var = int(df[(df["date"].dt.year == YEAR) & (df["date"].dt.month == m)]["amount"].sum())
     monthly_carry_over += (m_inc - m_fixed - m_var)
 
-# 이번 달 데이터 (기준 날짜 시점까지)
 m_df_full = df[(df["date"].dt.year == YEAR) & (df["date"].dt.month == selected_month)]
 cur_inc = st.session_state.income_data.get(month_key, 0)
 f_total_to_date = sum(e.amount for e in st.session_state.fixed_events if e.date.year == YEAR and e.date.month == selected_month and e.date <= simulated_today)
 v_total_to_date = int(m_df_full[m_df_full["date"].dt.date <= simulated_today]["amount"].sum())
 total_balance_to_date = cur_inc - f_total_to_date - v_total_to_date + monthly_carry_over
 
-# 주간 식비 계산 (달력 주차 기준)
 cal_obj = calendar.Calendar(firstweekday=0)
 weeks_list = cal_obj.monthdayscalendar(YEAR, selected_month)
 weekly_food_base = food_budget_total / len(weeks_list)
@@ -218,6 +211,7 @@ m5.metric("현재 잔액", f"{total_balance_to_date:,.0f}원")
 # -----------------------------
 st.markdown("---")
 st.subheader("🗓️ 지출 달력")
+
 f_date_map = {}; s_date_map = {}
 for e in [x for x in st.session_state.fixed_events if x.date.year == YEAR and x.date.month == selected_month]:
     f_date_map.setdefault(e.date.day, []).append(e)
@@ -242,20 +236,28 @@ for week in weeks_list:
         if not is_past:
             day_fixed = f_date_map.get(day_num, [])
             day_spent = s_date_map.get(day_num, [])
+            
+            # [수정] 고정비 상세 내역 표시 시 개별 금액 추가
             if day_fixed:
                 cell_html.append(f"<div style='color:#e74c3c; font-size:11px; font-weight:bold;'>고정: {sum(e.amount for e in day_fixed):,.0f}</div>")
-                for e in day_fixed: cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item}</div>")
+                for e in day_fixed: 
+                    cell_html.append(f"<div style='color:#c0392b; font-size:10px;'>· {e.item} ({e.amount:,.0f})</div>")
+            
             if day_spent:
                 cell_html.append(f"<div style='color:#3498db; font-size:11px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
                 for c, a, m in day_spent:
                     txt = m if m else c
                     cell_html.append(f"<div style='color:#2980b9; font-size:10px;'>· {txt} ({a:,.0f})</div>")
             
-            # 일요일에 잔액 표시
+            # [수정] 일요일(idx 6)에만 식비 및 예비비 잔액을 나란히 표시
             if idx == 6:
+                footer_parts = []
                 if day_num in weekly_food_balances:
-                    cell_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:11px; color:#27ae60; font-weight:bold; text-align:center;'>🍞 식비잔액: {weekly_food_balances[day_num]:,.0f}</div>")
-                cell_html.append(f"<div style='margin-top:5px; font-size:10px; color:#7f8c8d; text-align:right;'>🚨 예비비: {rem_em_to_date:,.0f}</div>")
+                    footer_parts.append(f"🍞 식비: {weekly_food_balances[day_num]:,.0f}")
+                footer_parts.append(f"🚨 예비: {rem_em_to_date:,.0f}")
+                
+                combined_footer = " | ".join(footer_parts)
+                cell_html.append(f"<div style='margin-top:10px; padding:3px; background:#f1f9f4; border-radius:4px; font-size:10px; color:#27ae60; font-weight:bold; text-align:center;'>{combined_footer}</div>")
         
         bg_color = "#ffffff" if not f_date_map.get(day_num, []) or is_past else "#fff4f4"
         today_style = "border: 2px solid #2ecc71;" if is_today else "border: 1px solid #ddd;"
@@ -267,9 +269,12 @@ for week in weeks_list:
 st.markdown("---")
 st.subheader("📜 이번 달 상세 지출 내역")
 if not m_df_full.empty:
+    st.info("💡 아래 표에서 내용을 직접 클릭하여 수정할 수 있습니다.")
     st.data_editor(m_df_full.assign(date=m_df_full["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
     with st.expander("🗑️ 지출 항목 삭제", expanded=False):
         to_del = st.multiselect("삭제할 항목 선택", options=list(m_df_full.index), format_func=lambda x: f"{m_df_full.loc[x,'date'].date()} | {m_df_full.loc[x,'memo']} | {m_df_full.loc[x,'amount']:,}원")
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
             st.rerun()
+else:
+    st.info("내역이 없습니다.")
