@@ -256,7 +256,7 @@ d1, d2, d3 = st.columns([1, 1, 2])
 d1.write(f"💵 실제 가용 예산: **{total_budgetable:,.0f}원** (수입-저축-고정비)")
 d2.write(f"📝 계획한 예산 총합: **{total_planned:,.0f}원**")
 # surplus가 있는 경우 '남습니다' 대신 '예비비 자동 합산됨' 안내
-result_text = f"💡 결과: 현재 계획상 **{abs(adequacy):,.0f}원**이 부족합니다." if adequacy < 0 else f"💡 결과: 남는 자금 **{surplus:,.0f}원**을 예비비에 자동 할당하여 아구를 맞췄습니다."
+result_text = f"💡 결과: 현재 계획상 **{abs(adequacy):,.0f}원**이 부족합니다." if adequacy < 0 else f"💡 결과: 남는 자금 **{surplus:,.0f}원**을 예비비에 자동 할당하였습니다."
 st.info(result_text)
 
 st.markdown("---")
@@ -334,3 +334,4 @@ if not v_period_df.empty:
                                 format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True); st.rerun()
+
