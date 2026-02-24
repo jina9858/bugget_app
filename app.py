@@ -10,15 +10,12 @@ from typing import List, Dict, Tuple
 # 0. 페이지 기본 설정 및 [달력 전용 글씨 최적화 CSS]
 st.set_page_config(page_title="예산 달력", layout="wide")
 
-# 사이드바와 메인 폰트는 원래대로, 달력 내부만 조정할 수 있도록 전역 설정 제거
 st.markdown("""
     <style>
-        /* 달력 칸 내부의 기본 텍스트 크기 지정 */
         .cal-content {
             font-size: 14px !important;
             line-height: 1.4;
         }
-        /* 메트릭(숫자) 크기는 가독성을 위해 살짝만 유지 */
         [data-testid="stMetricValue"] {
             font-size: 22px !important;
         }
@@ -102,9 +99,6 @@ def load_fixed_events() -> List[Event]:
     save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in base])
     return base
 
-def save_fixed_events(events: List[Event]):
-    save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in events])
-
 # -----------------------------
 # 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
 # -----------------------------
@@ -174,7 +168,7 @@ with st.sidebar.expander("📝 수입 및 고정비 항목 수정"):
         save_json(INCOME_FILE, st.session_state.income_data)
         new_fixed = [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"]) for r in edited_fixed.to_dict(orient="records")]
         st.session_state.fixed_events = new_fixed
-        save_fixed_events(new_fixed)
+        save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in new_fixed])
         st.rerun()
 
 # ---------- Main ----------
@@ -223,16 +217,16 @@ padding = (7 - (len(full_grid) % 7)) % 7
 full_grid += [None] * padding
 weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
-# 항목별 정산 계산
+# 식비 및 기타 예산 정산 계산
+weekly_food_base = food_budget_total / len(weeks)
+weekly_food_balances = {}
+total_food_surplus_deficit = 0
+
+# 항목별 현재까지 사용한 금액
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
 used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].sum())
 used_em = int(v_period_df[v_period_df["category"] == "예비비"]["amount"].sum())
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
-
-# 주간 식비 계산 (이월 없음)
-weekly_food_base = food_budget_total / len(weeks)
-weekly_food_balances = {}
-total_food_surplus_deficit = 0
 
 for week_row in weeks:
     valid = [d for d in week_row if d is not None]
@@ -241,17 +235,15 @@ for week_row in weeks:
     w_food_spent = int(v_period_df[(v_period_df["category"] == "식비") & (v_period_df["date"].dt.date >= ws) & (v_period_df["date"].dt.date <= we)]["amount"].sum())
     w_food_bal = weekly_food_base - w_food_spent
     total_food_surplus_deficit += w_food_bal
-    
     cum_spent_df = v_period_df[v_period_df["date"].dt.date <= we]
     rem_hh = household_budget_total - int(cum_spent_df[cum_spent_df["category"] == "생활용품"]["amount"].sum())
     rem_tr = transport_budget_total - int(cum_spent_df[cum_spent_df["category"] == "교통/차량"]["amount"].sum())
     rem_em = em_budget_total - int(cum_spent_df[cum_spent_df["category"] == "예비비"]["amount"].sum())
-    
     target_date = week_row[6] if (len(week_row) > 6 and week_row[6]) else we
     weekly_food_balances[target_date] = {"food": w_food_bal, "hh": rem_hh, "tr": rem_tr, "em": rem_em}
 
 # -----------------------------
-# 4. 상단 대시보드 및 항목별 정산
+# 4. 상단 대시보드 및 [수정] 항목별 정산 통합 레이아웃
 # -----------------------------
 st.markdown(f"### 📊 자금 흐름 현황 (기간: {budget_start.strftime('%m/%d')} ~ {budget_end.strftime('%m/%d')})")
 m1, m2, m3, m4, m5 = st.columns(5)
@@ -262,14 +254,19 @@ m4.metric("💰 총 현금 자산", f"{st.session_state.cash_data['total_balance
 m5.metric("현재 가용 잔액", f"{total_balance:,.0f}원")
 
 st.markdown("---")
-st.markdown("### 🎯 주간/월간 예산 정산 (사용한 금액)")
-b1, b2, b3, b4, b5 = st.columns(5)
-b1.metric("🍔 식비 총 예산", f"{food_budget_total:,.0f}원", f"사용: {used_food:,.0f}원")
-b2.metric("🧺 생활용품", f"{household_budget_total:,.0f}원", f"사용: {used_hh:,.0f}원")
-b3.metric("🚗 차량/교통", f"{transport_budget_total:,.0f}원", f"사용: {used_tr:,.0f}원")
-b4.metric("🚨 예비비", f"{em_budget_total:,.0f}원", f"사용: {used_em:,.0f}원")
-food_label = "절약" if total_food_surplus_deficit >= 0 else "초과"
-b5.metric(f"🥗 식비 총 정산 ({food_label})", f"{total_food_surplus_deficit:,.0f}원", delta=total_food_surplus_deficit)
+# [수정] 예산 밑에 바로 정산(남은 금액)이 오도록 배치
+st.markdown("### 🎯 항목별 예산 및 정산 현황")
+b1, b2, b3, b4 = st.columns(4)
+
+# 기타 항목별 정산(남은 금액) 계산
+hh_settlement = household_budget_total - used_hh
+tr_settlement = transport_budget_total - used_tr
+em_settlement = em_budget_total - used_em
+
+b1.metric("🍔 식비 총 예산", f"{food_budget_total:,.0f}원", delta=f"{total_food_surplus_deficit:,.0f}원 (정산)")
+b2.metric("🧺 생활용품 예산", f"{household_budget_total:,.0f}원", delta=f"{hh_settlement:,.0f}원 (정산)")
+b3.metric("🚗 차량/교통 예산", f"{transport_budget_total:,.0f}원", delta=f"{tr_settlement:,.0f}원 (정산)")
+b4.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{em_settlement:,.0f}원 (정산)")
 
 # -----------------------------
 # 5. 지출 달력
@@ -295,7 +292,6 @@ for week in weeks:
             continue
         
         is_today = (current_date == actual_today)
-        # 달력 내부 텍스트 크기만 cal-content 클래스로 제어
         cell_html = [f"<div class='cal-content'><div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
         
         if idx == 6 or current_date == budget_end:
@@ -329,7 +325,7 @@ for week in weeks:
                 txt = m if m else c
                 cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {txt} ({a:,.0f})</div>")
         
-        cell_html.append("</div>") # cal-content 닫기
+        cell_html.append("</div>")
         border_style = "4px solid #ccff00" if is_today else "1px solid #ddd"
         radius_style = "20px" if is_today else "8px"
         bg_color = "#fff4f4" if day_fixed else "#ffffff"
