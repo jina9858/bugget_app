@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import calendar
 import datetime as dt
@@ -62,12 +63,82 @@ INCOME_FILE = "income_data.json"
 FIXED_FILE = "fixed_events.json"
 REF_DATE_FILE = "ref_dates.json"
 CASH_ASSETS_FILE = "cash_assets.json"
-EXPENSE_FILE = "expenses_data.json"  # 추가
+EXPENSE_FILE = "expenses_data.json"
+
+# -----------------------------
+# 브라우저 저장소(localStorage) 연동
+# -----------------------------
+BROWSER_STORAGE_PREFIX = "budget_app_store__"
+
+def _bootstrap_browser_store():
+    raw = components.html(
+        f"""
+        <script>
+        const prefix = {json.dumps(BROWSER_STORAGE_PREFIX)};
+        const out = {{}};
+        for (let i = 0; i < window.localStorage.length; i++) {{
+            const k = window.localStorage.key(i);
+            if (k && k.startsWith(prefix)) {{
+                out[k.slice(prefix.length)] = window.localStorage.getItem(k);
+            }}
+        }}
+        window.parent.postMessage({{
+            isStreamlitMessage: true,
+            type: "streamlit:setComponentValue",
+            value: JSON.stringify(out)
+        }}, "*");
+        </script>
+        """,
+        height=0,
+        key="browser_store_bootstrap"
+    )
+    return raw
+
+_BROWSER_STORE_RAW = _bootstrap_browser_store()
+if _BROWSER_STORE_RAW is None:
+    st.caption("저장 데이터 불러오는 중...")
+    st.stop()
+
+try:
+    BROWSER_STORE = json.loads(_BROWSER_STORE_RAW) if _BROWSER_STORE_RAW else {}
+except:
+    BROWSER_STORE = {}
+
+def _browser_save(key: str, data):
+    payload = json.dumps(data, ensure_ascii=False)
+    components.html(
+        f"""
+        <script>
+        window.localStorage.setItem(
+            {json.dumps(BROWSER_STORAGE_PREFIX + key)},
+            {json.dumps(payload)}
+        );
+        window.parent.postMessage({{
+            isStreamlitMessage: true,
+            type: "streamlit:setComponentValue",
+            value: "saved"
+        }}, "*");
+        </script>
+        """,
+        height=0,
+        key=f"save_{key}_{len(payload)}"
+    )
 
 # -----------------------------
 # 1. 데이터 관리 로직
 # -----------------------------
 def load_json(file_path, default_val):
+    browser_key = os.path.basename(file_path)
+
+    # 1순위: 브라우저 localStorage
+    raw_browser = BROWSER_STORE.get(browser_key)
+    if raw_browser not in (None, "", "null"):
+        try:
+            return json.loads(raw_browser)
+        except:
+            pass
+
+    # 2순위: 로컬 파일(PC 실행용 fallback)
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -77,8 +148,17 @@ def load_json(file_path, default_val):
     return default_val
 
 def save_json(file_path, data):
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    browser_key = os.path.basename(file_path)
+
+    # 1순위 저장: 브라우저 localStorage
+    _browser_save(browser_key, data)
+
+    # 2순위 저장: 로컬 파일(PC 실행용 fallback)
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except:
+        pass
 
 @dataclass(frozen=True)
 class Event:
