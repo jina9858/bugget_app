@@ -142,7 +142,7 @@ def load_fixed_events() -> List[Event]:
 # -----------------------------
 # 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
 # -----------------------------
-actual_today = dt.date(2026, 2, 24)
+actual_today = dt.date.today()
 
 if "income_data" not in st.session_state: 
     st.session_state.income_data = load_json(INCOME_FILE, {f"{YEAR}-{m:02d}": 0 for m in range(START_MONTH, END_MONTH + 1)})
@@ -209,9 +209,23 @@ if st.sidebar.button("💰 자산 현황 업데이트"):
 
 with st.sidebar.expander("📝 수입 및 고정비 항목 수정"):
     income_df = pd.DataFrame([{"월": k, "수입(원)": v} for k, v in st.session_state.income_data.items()])
-    edited_inc = st.data_editor(income_df, use_container_width=True, hide_index=True)
+    edited_inc = st.data_editor(
+        income_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "수입(원)": st.column_config.NumberColumn(format="%,d")
+        }
+    )
     fixed_df = pd.DataFrame([{"date": e.date.isoformat(), "item": e.item, "amount": e.amount, "category": e.category} for e in st.session_state.fixed_events])
-    edited_fixed = st.data_editor(fixed_df, use_container_width=True, num_rows="dynamic")
+    edited_fixed = st.data_editor(
+        fixed_df,
+        use_container_width=True,
+        num_rows="dynamic",
+        column_config={
+            "amount": st.column_config.NumberColumn(format="%,d")
+        }
+    )
     if st.button("💾 모든 변경사항 저장"):
         st.session_state.income_data = dict(zip(edited_inc["월"], edited_inc["수입(원)"]))
         save_json(INCOME_FILE, st.session_state.income_data)
@@ -494,7 +508,14 @@ else:
 st.markdown("---")
 st.subheader("📜 기간 상세 지출 내역")
 if not v_period_df.empty:
-    st.data_editor(v_period_df.assign(date=v_period_df["date"].dt.date).sort_values("date"), use_container_width=True, hide_index=True)
+    st.data_editor(
+        v_period_df.assign(date=v_period_df["date"].dt.date).sort_values("date"),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "amount": st.column_config.NumberColumn(format="%,d")
+        }
+    )
     with st.expander("🗑️ 지출 항목 삭제", expanded=False):
         to_del = st.multiselect("삭제할 항목 선택", options=list(v_period_df.index), 
                                 format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
