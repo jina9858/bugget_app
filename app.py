@@ -111,11 +111,11 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
             Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",       32830),
         ]
 
-        for dday in [5, 10, 15, 20, 25, 30]:
-            try:
-                events.append(Event(dt.date(year, m, dday), "보험", "메리츠 운전자보험", 10280))
-            except Exception:
-                pass
+        # 메리츠 운전자보험: 매달 5일 1회 출금
+        try:
+            events.append(Event(dt.date(year, m, 5), "보험", "메리츠 운전자보험", 10280))
+        except Exception:
+            pass
 
         if m >= 3:
             events.append(Event(dt.date(year, m, 13), "생활/구독", "네이버 멤버십", 4900))
