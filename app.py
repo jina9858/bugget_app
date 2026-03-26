@@ -66,7 +66,6 @@ EXPENSE_FILE = "expenses_data.json"
 
 # Google Sheets 설정
 GOOGLE_SHEET_NAME = "budget_app"
-GOOGLE_CREDENTIALS_FILE = "credentials.json"
 
 # -----------------------------
 # Google Sheets 연결
@@ -77,8 +76,8 @@ def connect_gsheet():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-    creds = Credentials.from_service_account_file(
-        GOOGLE_CREDENTIALS_FILE,
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
         scopes=scope
     )
     client = gspread.authorize(creds)
