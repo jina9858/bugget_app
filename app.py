@@ -12,9 +12,9 @@ st.set_page_config(page_title="예산 달력", layout="wide")
 
 st.markdown("""
     <style>
-        /* [추가됨] 왼쪽 사이드바 너비 넓게 펴주기 */
+        /* [수정] 왼쪽 사이드바 너비 2배 확대 */
         section[data-testid="stSidebar"] {
-            min-width: 340px !important;
+            min-width: 680px !important;
         }
 
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
