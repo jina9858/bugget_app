@@ -7,12 +7,15 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
+import gspread
+from google.oauth2.service_account import Credentials
+
 # 0. 페이지 기본 설정 및 [달력 전용 글씨 최적화 CSS]
 st.set_page_config(page_title="예산 달력", layout="wide")
 
 st.markdown("""
     <style>
-        /* [수정] 왼쪽 사이드바 너비 2배 확대 */
+        /* [수정] 왼쪽 사이드바 너비 */
         section[data-testid="stSidebar"] {
             min-width: 350px !important;
         }
@@ -25,11 +28,9 @@ st.markdown("""
 
         @media screen and (max-width: 600px) {
             h1 { font-size: 20px !important; margin-bottom: 5px !important; }
-            /* 모바일 화면일 때만 3개 타이틀(h3) 사이즈를 14px로 줄이고 자간을 좁혀 한 줄에 쏙 들어가게 함 */
             h3 { font-size: 18px !important; letter-spacing: -0.5px !important; }
         }
 
-        /* 원래 설정하신 달력 텍스트 및 숫자 크기 100% 유지 (절대 건드리지 않음) */
         .cal-content {
             font-size: 18px !important;
             line-height: 1.4;
@@ -38,7 +39,6 @@ st.markdown("""
             font-size: 18px !important;
         }
         
-        /* 모바일 세로모드(Z플립) 전용 카드 스타일 */
         .mobile-card {
             border: 1px solid #e0e0e0;
             border-radius: 12px;
@@ -64,24 +64,60 @@ REF_DATE_FILE = "ref_dates.json"
 CASH_ASSETS_FILE = "cash_assets.json"
 EXPENSE_FILE = "expenses_data.json"
 
+# Google Sheets 설정
+GOOGLE_SHEET_NAME = "budget_app"
+GOOGLE_CREDENTIALS_FILE = "credentials.json"
+
+# -----------------------------
+# Google Sheets 연결
+# -----------------------------
+@st.cache_resource
+def connect_gsheet():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_file(
+        GOOGLE_CREDENTIALS_FILE,
+        scopes=scope
+    )
+    client = gspread.authorize(creds)
+    spreadsheet = client.open(GOOGLE_SHEET_NAME)
+    return spreadsheet
+
+def worksheet_name_from_file(file_path: str) -> str:
+    return os.path.splitext(os.path.basename(file_path))[0]
+
+def get_or_create_worksheet(sheet_name: str):
+    spreadsheet = connect_gsheet()
+    try:
+        ws = spreadsheet.worksheet(sheet_name)
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=sheet_name, rows=100, cols=20)
+    return ws
+
 # -----------------------------
 # 1. 데이터 관리 로직
 # -----------------------------
 def load_json(file_path, default_val):
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
+    sheet_name = worksheet_name_from_file(file_path)
+    try:
+        ws = get_or_create_worksheet(sheet_name)
+        raw = ws.acell("A1").value
+        if raw is None or str(raw).strip() == "":
             return default_val
-    return default_val
+        return json.loads(raw)
+    except Exception:
+        return default_val
 
 def save_json(file_path, data):
+    sheet_name = worksheet_name_from_file(file_path)
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except:
-        pass
+        ws = get_or_create_worksheet(sheet_name)
+        ws.clear()
+        ws.update("A1", [[json.dumps(data, ensure_ascii=False)]])
+    except Exception as e:
+        st.error(f"{sheet_name} 저장 실패: {e}")
 
 @dataclass(frozen=True)
 class Event:
@@ -138,9 +174,30 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
 def load_fixed_events() -> List[Event]:
     data = load_json(FIXED_FILE, [])
     if data:
-        return [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"], note=r.get("note","")) for r in data]
+        return [
+            Event(
+                date=dt.date.fromisoformat(r["date"]),
+                category=r["category"],
+                item=r["item"],
+                amount=r["amount"],
+                note=r.get("note", "")
+            )
+            for r in data
+        ]
     base = build_fixed_events()
-    save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in base])
+    save_json(
+        FIXED_FILE,
+        [
+            {
+                "date": e.date.isoformat(),
+                "category": e.category,
+                "item": e.item,
+                "amount": e.amount,
+                "note": e.note
+            }
+            for e in base
+        ]
+    )
     return base
 
 # -----------------------------
@@ -148,17 +205,30 @@ def load_fixed_events() -> List[Event]:
 # -----------------------------
 actual_today = dt.date.today()
 
-if "income_data" not in st.session_state: 
-    st.session_state.income_data = load_json(INCOME_FILE, {f"{YEAR}-{m:02d}": 0 for m in range(START_MONTH, END_MONTH + 1)})
-if "fixed_events" not in st.session_state: 
+if "income_data" not in st.session_state:
+    st.session_state.income_data = load_json(
+        INCOME_FILE,
+        {f"{YEAR}-{m:02d}": 0 for m in range(START_MONTH, END_MONTH + 1)}
+    )
+
+if "fixed_events" not in st.session_state:
     st.session_state.fixed_events = load_fixed_events()
+
 if "ref_dates" not in st.session_state:
     st.session_state.ref_dates = load_json(REF_DATE_FILE, {})
+
 if "cash_data" not in st.session_state:
-    st.session_state.cash_data = load_json(CASH_ASSETS_FILE, {"total_balance": 0, "monthly": {}})
+    st.session_state.cash_data = load_json(
+        CASH_ASSETS_FILE,
+        {"total_balance": 0, "monthly": {}}
+    )
+
 if "df" not in st.session_state:
     loaded_expenses = load_json(EXPENSE_FILE, [])
-    st.session_state.df = pd.DataFrame(loaded_expenses, columns=["date", "category", "memo", "amount"])
+    st.session_state.df = pd.DataFrame(
+        loaded_expenses,
+        columns=["date", "category", "memo", "amount"]
+    )
     if st.session_state.df.empty:
         st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
@@ -167,7 +237,11 @@ if "df" not in st.session_state:
 st.sidebar.header("⚙️ 예산 설정")
 st.sidebar.info(f"✨ 실제 오늘: {actual_today.strftime('%Y-%m-%d')}")
 
-selected_month = st.sidebar.selectbox("조회 월 선택", options=list(range(START_MONTH, END_MONTH + 1)), format_func=lambda m: f"{m}월")
+selected_month = st.sidebar.selectbox(
+    "조회 월 선택",
+    options=list(range(START_MONTH, END_MONTH + 1)),
+    format_func=lambda m: f"{m}월"
+)
 month_key = f"{YEAR}-{selected_month:02d}"
 
 saved_val = st.session_state.ref_dates.get(month_key)
@@ -176,11 +250,20 @@ if isinstance(saved_val, dict) and "start" in saved_val:
 else:
     saved_dates = {"start": f"{YEAR}-{selected_month:02d}-01", "end": f"{YEAR}-{selected_month:02d}-24"}
 
-budget_start = st.sidebar.date_input(f"📅 예산 시작일", value=dt.date.fromisoformat(saved_dates["start"]))
-budget_end = st.sidebar.date_input(f"🏁 예산 종료일", value=dt.date.fromisoformat(saved_dates["end"]))
+budget_start = st.sidebar.date_input(
+    f"📅 예산 시작일",
+    value=dt.date.fromisoformat(saved_dates["start"])
+)
+budget_end = st.sidebar.date_input(
+    f"🏁 예산 종료일",
+    value=dt.date.fromisoformat(saved_dates["end"])
+)
 
 if budget_start.isoformat() != saved_dates.get("start") or budget_end.isoformat() != saved_dates.get("end"):
-    st.session_state.ref_dates[month_key] = {"start": budget_start.isoformat(), "end": budget_end.isoformat()}
+    st.session_state.ref_dates[month_key] = {
+        "start": budget_start.isoformat(),
+        "end": budget_end.isoformat()
+    }
     save_json(REF_DATE_FILE, st.session_state.ref_dates)
     st.rerun()
 
@@ -193,20 +276,43 @@ em_budget_input = st.sidebar.number_input("🚨 월 예비비 기본 예산", mi
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🅿️ 현금 자산 (파킹) 관리")
-cash_month_data = st.session_state.cash_data["monthly"].get(month_key, {"savings": 0, "withdrawal": 0, "withdrawal_date": budget_start.isoformat()})
-monthly_savings = st.sidebar.number_input("이번 달 파킹(저금)", min_value=0, value=cash_month_data.get("savings", 0), step=10000)
-withdrawal = st.sidebar.number_input("비상금 인출", min_value=0, value=cash_month_data.get("withdrawal", 0), step=10000)
+cash_month_data = st.session_state.cash_data["monthly"].get(
+    month_key,
+    {"savings": 0, "withdrawal": 0, "withdrawal_date": budget_start.isoformat()}
+)
+monthly_savings = st.sidebar.number_input(
+    "이번 달 파킹(저금)",
+    min_value=0,
+    value=cash_month_data.get("savings", 0),
+    step=10000
+)
+withdrawal = st.sidebar.number_input(
+    "비상금 인출",
+    min_value=0,
+    value=cash_month_data.get("withdrawal", 0),
+    step=10000
+)
 withdrawal_date_val = cash_month_data.get("withdrawal_date", budget_start.isoformat())
 try:
-    withdrawal_date = st.sidebar.date_input("비상금 인출 날짜", value=dt.date.fromisoformat(withdrawal_date_val))
+    withdrawal_date = st.sidebar.date_input(
+        "비상금 인출 날짜",
+        value=dt.date.fromisoformat(withdrawal_date_val)
+    )
 except:
     withdrawal_date = st.sidebar.date_input("비상금 인출 날짜", value=budget_start)
 
 if st.sidebar.button("💰 자산 현황 업데이트"):
-    old_data = st.session_state.cash_data["monthly"].get(month_key, {"savings": 0, "withdrawal": 0})
+    old_data = st.session_state.cash_data["monthly"].get(
+        month_key,
+        {"savings": 0, "withdrawal": 0}
+    )
     diff = (monthly_savings - old_data.get("savings", 0)) - (withdrawal - old_data.get("withdrawal", 0))
     st.session_state.cash_data["total_balance"] += diff
-    st.session_state.cash_data["monthly"][month_key] = {"savings": monthly_savings, "withdrawal": withdrawal, "withdrawal_date": withdrawal_date.isoformat()}
+    st.session_state.cash_data["monthly"][month_key] = {
+        "savings": monthly_savings,
+        "withdrawal": withdrawal,
+        "withdrawal_date": withdrawal_date.isoformat()
+    }
     save_json(CASH_ASSETS_FILE, st.session_state.cash_data)
     st.rerun()
 
@@ -220,7 +326,16 @@ with st.sidebar.expander("📝 수입 및 고정비 항목 수정"):
             "수입(원)": st.column_config.NumberColumn(format="%,d")
         }
     )
-    fixed_df = pd.DataFrame([{"date": e.date.isoformat(), "item": e.item, "amount": e.amount, "category": e.category} for e in st.session_state.fixed_events])
+
+    fixed_df = pd.DataFrame([
+        {
+            "date": e.date.isoformat(),
+            "item": e.item,
+            "amount": e.amount,
+            "category": e.category
+        }
+        for e in st.session_state.fixed_events
+    ])
     edited_fixed = st.data_editor(
         fixed_df,
         use_container_width=True,
@@ -229,12 +344,34 @@ with st.sidebar.expander("📝 수입 및 고정비 항목 수정"):
             "amount": st.column_config.NumberColumn(format="%,d")
         }
     )
+
     if st.button("💾 모든 변경사항 저장"):
         st.session_state.income_data = dict(zip(edited_inc["월"], edited_inc["수입(원)"]))
         save_json(INCOME_FILE, st.session_state.income_data)
-        new_fixed = [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"]) for r in edited_fixed.to_dict(orient="records")]
+
+        new_fixed = [
+            Event(
+                date=dt.date.fromisoformat(r["date"]),
+                category=r["category"],
+                item=r["item"],
+                amount=r["amount"]
+            )
+            for r in edited_fixed.to_dict(orient="records")
+        ]
         st.session_state.fixed_events = new_fixed
-        save_json(FIXED_FILE, [{"date": e.date.isoformat(), "category": e.category, "item": e.item, "amount": e.amount, "note": e.note} for e in new_fixed])
+        save_json(
+            FIXED_FILE,
+            [
+                {
+                    "date": e.date.isoformat(),
+                    "category": e.category,
+                    "item": e.item,
+                    "amount": e.amount,
+                    "note": e.note
+                }
+                for e in new_fixed
+            ]
+        )
         st.rerun()
 
 # -----------------------------
@@ -353,7 +490,10 @@ with st.expander("➕ 지출 추가하기", expanded=True):
         if amt > 0:
             new_row = pd.DataFrame([{"date": pd.to_datetime(d), "category": cat, "memo": memo, "amount": int(amt)}])
             st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-            save_json(EXPENSE_FILE, st.session_state.df.assign(date=st.session_state.df["date"].dt.strftime("%Y-%m-%d")).to_dict(orient="records"))
+            save_json(
+                EXPENSE_FILE,
+                st.session_state.df.assign(date=st.session_state.df["date"].dt.strftime("%Y-%m-%d")).to_dict(orient="records")
+            )
             st.rerun()
 
 # 공통 데이터 매핑
@@ -467,9 +607,15 @@ if not v_period_df.empty:
         }
     )
     with st.expander("🗑️ 지출 항목 삭제", expanded=False):
-        to_del = st.multiselect("삭제할 항목 선택", options=list(v_period_df.index), 
-                                format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
+        to_del = st.multiselect(
+            "삭제할 항목 선택",
+            options=list(v_period_df.index), 
+            format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원"
+        )
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
-            save_json(EXPENSE_FILE, st.session_state.df.assign(date=st.session_state.df["date"].dt.strftime("%Y-%m-%d")).to_dict(orient="records"))
+            save_json(
+                EXPENSE_FILE,
+                st.session_state.df.assign(date=st.session_state.df["date"].dt.strftime("%Y-%m-%d")).to_dict(orient="records")
+            )
             st.rerun()
