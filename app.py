@@ -14,7 +14,7 @@ st.markdown("""
     <style>
         /* [수정] 왼쪽 사이드바 너비 2배 확대 */
         section[data-testid="stSidebar"] {
-            min-width: 680px !important;
+            min-width: 480px !important;
         }
 
         /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
