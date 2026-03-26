@@ -79,4 +79,52 @@ def save_json(file_path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 @dataclass(frozen=True)
-class
+class Event:
+    date: dt.date
+    category: str
+    item: str
+    amount: int
+    note: str = ""
+
+def next_monday_if_weekend(d: dt.date) -> dt.date:
+    if d.weekday() == 5: return d + dt.timedelta(days=2)
+    if d.weekday() == 6: return d + dt.timedelta(days=1)
+    return d
+
+def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) -> List[Event]:
+    events: List[Event] = []
+    feb_cutoff = dt.date(YEAR, 2, 22)
+    for m in range(start_month, end_month + 1):
+        events += [
+            Event(dt.date(year, m, 5),  "생활/구독", "금천누리복지 후원", 50000),
+            Event(dt.date(year, m, 9),  "통신",     "LGU+ 휴대폰",      19220),
+            Event(dt.date(year, m, 10), "공과금",   "도시가스",         70913),
+            Event(dt.date(year, m, 10), "수수료",   "SMS 수수료",          300),
+            Event(dt.date(year, m, 12), "공과금",   "수도요금",         28370),
+            Event(dt.date(year, m, 23), "계돈/송금", "계돈(김아름)",     100000),
+            Event(dt.date(year, m, 23), "계돈/송금", "정기송금(김주환)", 100000),
+            Event(dt.date(year, m, 23), "계돈/송금", "계돈(우연지)",      30000),
+            Event(dt.date(year, m, 23), "계돈/송금", "계돈(김영민)",      20000),
+            Event(dt.date(year, m, 25), "금융/보험", "교보생명",         212108),
+            Event(dt.date(year, m, 25), "금융/보험", "농협생명",         136200),
+            Event(dt.date(year, m, 25), "공과금",   "전기요금",          26166),
+            Event(dt.date(year, m, 25), "보험",     "카카오페이 운전자보험", 8800),
+            Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",       32830),
+        ]
+        for dday in [5, 10, 15, 20, 25, 30]:
+            try: events.append(Event(dt.date(year, m, dday), "보험", "메리츠 운전자보험", 10280))
+            except: pass
+        if m >= 3:
+            events.append(Event(dt.date(year, m, 13), "생활/구독", "네이버 멤버십", 4900))
+            events.append(Event(dt.date(year, m, 24), "생활/구독", "AI 구독",      30000))
+        try:
+            ld_val = calendar.monthrange(year, m)[1]
+            events.append(Event(next_monday_if_weekend(dt.date(year, m, ld_val)), "주거/공과금", "관리비", 110000))
+        except: pass
+    return [e for e in events if not (e.date.year == YEAR and e.date.month == 2 and e.date < feb_cutoff)]
+
+def load_fixed_events() -> List[Event]:
+    data = load_json(FIXED_FILE, [])
+    if data:
+        return [Event(date=dt.date.fromisoformat(r["date"]), category=r["category"], item=r["item"], amount=r["amount"], note=r.get("note","")) for r in data]
+    base =
