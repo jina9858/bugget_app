@@ -186,16 +186,7 @@ if "cash_data" not in st.session_state:
     )
 
 if "budget_settings" not in st.session_state:
-    st.session_state.budget_settings = load_json(
-        BUDGET_SETTINGS_FILE,
-        {
-            "food_budget_total": 650000,
-            "hh_budget_total": 100000,
-            "tr_budget_total": 150000,
-            "other_budget_total": 50000,
-            "em_budget_input": 200000
-        }
-    )
+    st.session_state.budget_settings = load_json(BUDGET_SETTINGS_FILE, {})
 
 if "df" not in st.session_state:
     loaded_expenses = load_json(EXPENSE_FILE, [])
@@ -224,6 +215,17 @@ if isinstance(saved_val, dict) and "start" in saved_val:
 else:
     saved_dates = {"start": f"{YEAR}-{selected_month:02d}-01", "end": f"{YEAR}-{selected_month:02d}-24"}
 
+saved_budget = st.session_state.budget_settings.get(
+    month_key,
+    {
+        "food_budget_total": 650000,
+        "hh_budget_total": 100000,
+        "tr_budget_total": 150000,
+        "other_budget_total": 50000,
+        "em_budget_input": 200000
+    }
+)
+
 budget_start = st.sidebar.date_input(
     f"📅 예산 시작일",
     value=dt.date.fromisoformat(saved_dates["start"])
@@ -233,57 +235,55 @@ budget_end = st.sidebar.date_input(
     value=dt.date.fromisoformat(saved_dates["end"])
 )
 
-if budget_start.isoformat() != saved_dates.get("start") or budget_end.isoformat() != saved_dates.get("end"):
-    st.session_state.ref_dates[month_key] = {
-        "start": budget_start.isoformat(),
-        "end": budget_end.isoformat()
-    }
-    save_json(REF_DATE_FILE, st.session_state.ref_dates)
-    st.rerun()
-
 st.sidebar.markdown("---")
 food_budget_total = st.sidebar.number_input(
     "🍔 월 식비 총 예산",
     min_value=0,
-    value=st.session_state.budget_settings.get("food_budget_total", 650000),
+    value=int(saved_budget.get("food_budget_total", 650000)),
     step=10000
 )
 hh_budget_total = st.sidebar.number_input(
     "🧺 월 생활용품 예산",
     min_value=0,
-    value=st.session_state.budget_settings.get("hh_budget_total", 100000),
+    value=int(saved_budget.get("hh_budget_total", 100000)),
     step=10000
 )
 tr_budget_total = st.sidebar.number_input(
     "🚗 월 차량/교통 예산",
     min_value=0,
-    value=st.session_state.budget_settings.get("tr_budget_total", 150000),
+    value=int(saved_budget.get("tr_budget_total", 150000)),
     step=10000
 )
 other_budget_total = st.sidebar.number_input(
     "➕ 월 기타 예산",
     min_value=0,
-    value=st.session_state.budget_settings.get("other_budget_total", 50000),
+    value=int(saved_budget.get("other_budget_total", 50000)),
     step=10000
 )
 em_budget_input = st.sidebar.number_input(
     "🚨 월 예비비 기본 예산",
     min_value=0,
-    value=st.session_state.budget_settings.get("em_budget_input", 200000),
+    value=int(saved_budget.get("em_budget_input", 200000)),
     step=10000
 )
 
-current_budget_settings = {
-    "food_budget_total": int(food_budget_total),
-    "hh_budget_total": int(hh_budget_total),
-    "tr_budget_total": int(tr_budget_total),
-    "other_budget_total": int(other_budget_total),
-    "em_budget_input": int(em_budget_input)
-}
+if st.sidebar.button("📌 예산 설정 저장"):
+    st.session_state.ref_dates[month_key] = {
+        "start": budget_start.isoformat(),
+        "end": budget_end.isoformat()
+    }
+    save_json(REF_DATE_FILE, st.session_state.ref_dates)
 
-if current_budget_settings != st.session_state.budget_settings:
-    st.session_state.budget_settings = current_budget_settings
+    st.session_state.budget_settings[month_key] = {
+        "food_budget_total": int(food_budget_total),
+        "hh_budget_total": int(hh_budget_total),
+        "tr_budget_total": int(tr_budget_total),
+        "other_budget_total": int(other_budget_total),
+        "em_budget_input": int(em_budget_input)
+    }
     save_json(BUDGET_SETTINGS_FILE, st.session_state.budget_settings)
+    st.sidebar.success("예산 설정 저장 완료")
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🅿️ 현금 자산 (파킹) 관리")
@@ -411,23 +411,23 @@ total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_bu
 adequacy = total_budgetable - total_planned
 total_balance = total_budgetable - int(v_period_df["amount"].sum())
 
-start_weekday = budget_start.weekday()
-full_grid = [None] * start_weekday + []
 date_list = []
 curr = budget_start
 while curr <= budget_end:
     date_list.append(curr)
     curr += dt.timedelta(days=1)
-full_grid = [None] * start_weekday + date_list
-padding = (7 - (len(full_grid) % 7)) % 7
-full_grid += [None] * padding
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
 used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].sum())
 used_other = int(v_period_df[v_period_df["category"] == "기타"]["amount"].sum())
 used_em = int(v_period_df[v_period_df["category"] == "예비비"]["amount"].sum())
+
+start_weekday = budget_start.weekday()
+full_grid = [None] * start_weekday + date_list
+padding = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 weekly_food_base = food_budget_total / len(weeks)
 weekly_balances = {}
