@@ -7,9 +7,6 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
-import gspread
-from google.oauth2.service_account import Credentials
-
 # 0. 페이지 기본 설정 및 [달력 전용 글씨 최적화 CSS]
 st.set_page_config(page_title="예산 달력", layout="wide")
 
@@ -64,59 +61,24 @@ REF_DATE_FILE = "ref_dates.json"
 CASH_ASSETS_FILE = "cash_assets.json"
 EXPENSE_FILE = "expenses_data.json"
 
-# Google Sheets 설정
-GOOGLE_SHEET_NAME = "budget_app"
-
-# -----------------------------
-# Google Sheets 연결
-# -----------------------------
-@st.cache_resource
-def connect_gsheet():
-    scope = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scope
-    )
-    client = gspread.authorize(creds)
-    spreadsheet = client.open(GOOGLE_SHEET_NAME)
-    return spreadsheet
-
-def worksheet_name_from_file(file_path: str) -> str:
-    return os.path.splitext(os.path.basename(file_path))[0]
-
-def get_or_create_worksheet(sheet_name: str):
-    spreadsheet = connect_gsheet()
-    try:
-        ws = spreadsheet.worksheet(sheet_name)
-    except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=sheet_name, rows=100, cols=20)
-    return ws
-
 # -----------------------------
 # 1. 데이터 관리 로직
 # -----------------------------
 def load_json(file_path, default_val):
-    sheet_name = worksheet_name_from_file(file_path)
-    try:
-        ws = get_or_create_worksheet(sheet_name)
-        raw = ws.acell("A1").value
-        if raw is None or str(raw).strip() == "":
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
             return default_val
-        return json.loads(raw)
-    except Exception:
-        return default_val
+    return default_val
 
 def save_json(file_path, data):
-    sheet_name = worksheet_name_from_file(file_path)
     try:
-        ws = get_or_create_worksheet(sheet_name)
-        ws.clear()
-        ws.update("A1", [[json.dumps(data, ensure_ascii=False)]])
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        st.error(f"{sheet_name} 저장 실패: {e}")
+        st.error(f"{file_path} 저장 실패: {e}")
 
 @dataclass(frozen=True)
 class Event:
@@ -412,7 +374,6 @@ used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].
 used_other = int(v_period_df[v_period_df["category"] == "기타"]["amount"].sum())
 used_em = int(v_period_df[v_period_df["category"] == "예비비"]["amount"].sum())
 
-# 주간 계산용 grid는 유지
 start_weekday = budget_start.weekday()
 full_grid = [None] * start_weekday + date_list
 padding = (7 - (len(full_grid) % 7)) % 7
