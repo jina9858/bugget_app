@@ -434,3 +434,33 @@ for current_date in date_list:
 
     if day_spent:
         html_lines.append(f"<div style='color:#3498db; font-size:14px; font-weight:bold; margin-top:8px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
+        for c, a, m in day_spent:
+            m_txt = m if m else c
+            html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m_txt} ({a:,.0f}원)</div>")
+
+    if not day_fixed and not day_spent and not has_withdrawal:
+        html_lines.append("<div style='color:#aaa; font-size:13px; text-align:center; padding: 10px 0;'>지출 내역 없음</div>")
+
+    html_lines.append("</div>")
+    st.markdown("".join(html_lines), unsafe_allow_html=True)
+
+# -----------------------------
+# 6. 상세 지출 내역 및 삭제 기능
+# -----------------------------
+st.markdown("---")
+st.subheader("📜 기간 상세 지출 내역")
+if not v_period_df.empty:
+    st.data_editor(
+        v_period_df.assign(date=v_period_df["date"].dt.date).sort_values("date"),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "amount": st.column_config.NumberColumn(format="%,d")
+        }
+    )
+    with st.expander("🗑️ 지출 항목 삭제", expanded=False):
+        to_del = st.multiselect("삭제할 항목 선택", options=list(v_period_df.index), 
+                                format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
+        if st.button("선택한 항목 삭제"):
+            st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
+            st.rerun()
