@@ -62,6 +62,7 @@ INCOME_FILE = "income_data.json"
 FIXED_FILE = "fixed_events.json"
 REF_DATE_FILE = "ref_dates.json"
 CASH_ASSETS_FILE = "cash_assets.json"
+EXPENSE_FILE = "expenses_data.json"  # 추가
 
 # -----------------------------
 # 1. 데이터 관리 로직
@@ -153,7 +154,10 @@ if "ref_dates" not in st.session_state:
 if "cash_data" not in st.session_state:
     st.session_state.cash_data = load_json(CASH_ASSETS_FILE, {"total_balance": 0, "monthly": {}})
 if "df" not in st.session_state:
-    st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
+    loaded_expenses = load_json(EXPENSE_FILE, [])
+    st.session_state.df = pd.DataFrame(loaded_expenses, columns=["date", "category", "memo", "amount"])
+    if st.session_state.df.empty:
+        st.session_state.df = pd.DataFrame(columns=["date", "category", "memo", "amount"])
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
 # ---------- Sidebar ----------
@@ -346,6 +350,7 @@ with st.expander("➕ 지출 추가하기", expanded=True):
         if amt > 0:
             new_row = pd.DataFrame([{"date": pd.to_datetime(d), "category": cat, "memo": memo, "amount": int(amt)}])
             st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
+            save_json(EXPENSE_FILE, st.session_state.df.assign(date=st.session_state.df["date"].dt.strftime("%Y-%m-%d")).to_dict(orient="records"))
             st.rerun()
 
 # 공통 데이터 매핑
@@ -463,4 +468,5 @@ if not v_period_df.empty:
                                 format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
         if st.button("선택한 항목 삭제"):
             st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
+            save_json(EXPENSE_FILE, st.session_state.df.assign(date=st.session_state.df["date"].dt.strftime("%Y-%m-%d")).to_dict(orient="records"))
             st.rerun()
