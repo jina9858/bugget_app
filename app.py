@@ -140,7 +140,7 @@ def load_fixed_events() -> List[Event]:
     return base
 
 # -----------------------------
-# 2. 세션 상태 및 실제 오늘 날짜 (2026-02-24)
+# 2. 세션 상태 및 실제 오늘 날짜
 # -----------------------------
 actual_today = dt.date.today()
 
@@ -157,10 +157,6 @@ if "df" not in st.session_state:
     st.session_state.df["date"] = pd.to_datetime(st.session_state.df["date"])
 
 # ---------- Sidebar ----------
-st.sidebar.header("📱 디스플레이 설정")
-view_mode = st.sidebar.radio("화면 모드 선택", ["PC 모드 (달력형)", "모바일 모드 (세로형)"], index=0)
-st.sidebar.markdown("---")
-
 st.sidebar.header("⚙️ 예산 설정")
 st.sidebar.info(f"✨ 실제 오늘: {actual_today.strftime('%Y-%m-%d')}")
 
@@ -266,17 +262,19 @@ curr = budget_start
 while curr <= budget_end:
     date_list.append(curr)
     curr += dt.timedelta(days=1)
-start_weekday = budget_start.weekday()
-full_grid = [None] * start_weekday + date_list
-padding = (7 - (len(full_grid) % 7)) % 7
-full_grid += [None] * padding
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
 used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].sum())
 used_other = int(v_period_df[v_period_df["category"] == "기타"]["amount"].sum())
 used_em = int(v_period_df[v_period_df["category"] == "예비비"]["amount"].sum())
+
+# 주간 계산용 grid는 유지
+start_weekday = budget_start.weekday()
+full_grid = [None] * start_weekday + date_list
+padding = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 weekly_food_base = food_budget_total / len(weeks)
 weekly_balances = {}
@@ -330,7 +328,7 @@ b5.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{(em_bu
 b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", delta="정산 총합", delta_color="off")
 
 # -----------------------------
-# 5. 지출 추가 및 달력/리스트
+# 5. 지출 추가 및 모바일 리스트
 # -----------------------------
 st.markdown("---")
 
@@ -358,167 +356,81 @@ for e in period_fixed_events:
 for _, r in v_period_df.iterrows():
     s_date_map.setdefault(r["date"].date(), []).append((r["category"], r["amount"], r["memo"]))
 
-if view_mode == "PC 모드 (달력형)":
-    st.subheader("🗓️ 지출 달력")
-    st.caption(f"📍 오늘은 {actual_today.strftime('%m월 %d일')}입니다. 연두색 테두리로 표시됩니다.")
-    header_cols = st.columns(7)
-    for idx, name in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
-        header_cols[idx].markdown(f"<div style='text-align:center; background:#eee; padding:5px; border-radius:5px;'><b>{name}</b></div>", unsafe_allow_html=True)
+st.subheader("📱 일자별 지출 내역")
+st.caption("모든 날짜를 표시합니다.")
 
-    for week in weeks:
-        cols = st.columns(7)
-        for idx, current_date in enumerate(week):
-            if current_date is None:
-                cols[idx].markdown("<div style='height:280px; background:#f9f9f9; border:1px solid #eee; border-radius:8px;'></div>", unsafe_allow_html=True)
+day_names = ["월", "화", "수", "목", "금", "토", "일"]
+w_info = st.session_state.cash_data["monthly"].get(month_key, {})
+
+for current_date in date_list:
+    is_today = (current_date == actual_today)
+    day_fixed = f_date_map.get(current_date, [])
+    day_spent = s_date_map.get(current_date, [])
+
+    has_withdrawal = w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date
+
+    f_sum = sum(e.amount for e in day_fixed)
+    s_sum = sum(a for _, a, _ in day_spent)
+
+    html_lines = []
+    card_class = "mobile-card mobile-today" if is_today else "mobile-card"
+    border_color = "#e74c3c" if day_fixed else "#3498db"
+
+    html_lines.append(f"<div class='{card_class}' style='border-left: 6px solid {border_color};'>")
+
+    today_badge = "<span style='color:#2ecc71; font-weight:bold; font-size:14px;'>[오늘]</span>" if is_today else ""
+    html_lines.append(f"<div style='display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px;'>")
+    html_lines.append(f"  <b style='font-size:18px; color:#333;'>{current_date.month}/{current_date.day} ({day_names[current_date.weekday()]}) {today_badge}</b>")
+    if f_sum > 0 or s_sum > 0:
+        html_lines.append(f"  <span style='font-size:14px; color:#555; font-weight:bold;'>일일 합계: {f_sum + s_sum:,.0f}원</span>")
+    else:
+        html_lines.append(f"  <span style='font-size:14px; color:#aaa; font-weight:bold;'>일일 합계: 0원</span>")
+    html_lines.append(f"</div>")
+
+    if has_withdrawal:
+        html_lines.append(f"<div style='background-color:#ff4b4b; color:white; padding:6px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
+
+    if current_date.weekday() == 6 or current_date == budget_end:
+        weeks_grid = [([None]*budget_start.weekday() + date_list)[i:i+7] for i in range(0, len([None]*budget_start.weekday() + date_list), 7)]
+        weekly_food_base = food_budget_total / len(weeks_grid)
+        w_bal = None
+        for week_row in weeks_grid:
+            valid = [d for d in week_row if d is not None]
+            if not valid:
                 continue
-            is_today = (current_date == actual_today)
-            cell_html = [f"<div class='cal-content'><div style='font-weight:bold; color:{'#2ecc71' if is_today else '#333'};'>{current_date.month}/{current_date.day} {'(오늘)' if is_today else ''}</div>"]
-            
-            w_info = st.session_state.cash_data["monthly"].get(month_key, {})
-            if w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date:
-                cell_html.append(f"<div style='background-color:#ff4b4b; color:white; padding:5px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
+            if (week_row[6] if (len(week_row) > 6 and week_row[6]) else valid[-1]) == current_date:
+                ws, we = valid[0], valid[-1]
+                w_food_spent = int(v_period_df[(v_period_df["category"] == "식비") & (v_period_df["date"].dt.date >= ws) & (v_period_df["date"].dt.date <= we)]["amount"].sum())
+                w_food_bal = weekly_food_base - w_food_spent
+                cum_spent_df = v_period_df[v_period_df["date"].dt.date <= we]
+                w_bal = {
+                    "food": w_food_bal,
+                    "hh": hh_budget_total - int(cum_spent_df[cum_spent_df["category"] == "생활용품"]["amount"].sum()),
+                    "tr": tr_budget_total - int(cum_spent_df[cum_spent_df["category"] == "교통/차량"]["amount"].sum()),
+                    "other": other_budget_total - int(cum_spent_df[cum_spent_df["category"] == "기타"]["amount"].sum()),
+                    "em": em_budget_total - int(cum_spent_df[cum_spent_df["category"] == "예비비"]["amount"].sum())
+                }
+                break
+        
+        if w_bal:
+            def get_c(val):
+                return "#e74c3c" if val < 0 else "#27ae60"
+            html_lines.append(f"""
+            <div style='margin-bottom:8px; padding:8px; background:#f1f9f4; border-radius:6px; font-size:13px; font-weight:bold; line-height:1.5;'>
+                <span style='color:{get_c(w_bal['food'])};'>🍞 주간 식비: {w_bal['food']:,.0f}</span><br>
+                <span style='color:{get_c(w_bal['hh'])};'>🧺 생활용품: {w_bal['hh']:,.0f}</span><br>
+                <span style='color:{get_c(w_bal['tr'])};'>🚗 차량/교통: {w_bal['tr']:,.0f}</span><br>
+                <span style='color:{get_c(w_bal['other'])};'>➕ 기타: {w_bal['other']:,.0f}</span>
+            </div>
+            <div style='padding:8px; background:#fff3cd; border-radius:6px; font-size:13px; font-weight:bold; border: 1px solid #ffeeba; margin-bottom:8px;'>
+                <span style='color:{get_c(w_bal['em'])};'>🚨 예비비: {w_bal['em']:,.0f}</span>
+            </div>
+            """)
 
-            if idx == 6 or current_date == budget_end:
-                if current_date in weekly_balances:
-                    b = weekly_balances[current_date]
-                    def get_color(val):
-                        return "#e74c3c" if val < 0 else "#27ae60"
-                    cell_html.append(f"""
-                    <div style='margin-bottom:10px; padding:5px; background:#f1f9f4; border-radius:4px; font-size:12px; font-weight:bold; line-height:1.4;'>
-                        <span style='color:{get_color(b['food'])};'>🍞 주간 식비: {b['food']:,.0f}</span><br>
-                        <span style='color:{get_color(b['hh'])};'>🧺 생활용품: {b['hh']:,.0f}</span><br>
-                        <span style='color:{get_color(b['tr'])};'>🚗 차량/교통: {b['tr']:,.0f}</span><br>
-                        <span style='color:{get_color(b['other'])};'>➕ 기타: {b['other']:,.0f}</span>
-                    </div>
-                    <div style='padding:5px; background:#fff3cd; border-radius:4px; font-size:12px; font-weight:bold; border: 1px solid #ffeeba;'>
-                        <span style='color:{get_color(b['em'])};'>🚨 예비비: {b['em']:,.0f}</span>
-                    </div>
-                    """)
+    if day_fixed:
+        html_lines.append(f"<div style='color:#e74c3c; font-size:14px; font-weight:bold; margin-top:4px;'>📌 고정 지출: {f_sum:,.0f}원</div>")
+        for e in day_fixed:
+            html_lines.append(f"<div style='color:#c0392b; font-size:13px; margin-left: 12px; margin-top:2px;'>· {e.item} ({e.amount:,.0f}원)</div>")
 
-            day_fixed = f_date_map.get(current_date, [])
-            day_spent = s_date_map.get(current_date, [])
-            if day_fixed:
-                cell_html.append(f"<div style='color:#e74c3c; font-size:13px; font-weight:bold;'>고정: {sum(e.amount for e in day_fixed):,.0f}</div>")
-                for e in day_fixed:
-                    cell_html.append(f"<div style='color:#c0392b; font-size:11px;'>· {e.item} ({e.amount:,.0f})</div>")
-            if day_spent:
-                cell_html.append(f"<div style='color:#3498db; font-size:13px; font-weight:bold; margin-top:5px;'>변동: {sum(a for _, a, _ in day_spent):,.0f}</div>")
-                for c, a, m in day_spent:
-                    cell_html.append(f"<div style='color:#2980b9; font-size:12px;'>· {m if m else c} ({a:,.0f})</div>")
-            
-            cell_html.append("</div>")
-            border_style = '4px solid #ccff00' if is_today else '1px solid #ddd'
-            bg_style = '#fff4f4' if day_fixed else '#ffffff'
-            rad_style = '20px' if is_today else '8px'
-            cols[idx].markdown(f"<div style='height:280px; border: {border_style}; padding:8px; background:{bg_style}; border-radius:{rad_style}; overflow-y:auto;'>{''.join(cell_html)}</div>", unsafe_allow_html=True)
-
-else:
-    st.subheader("📱 일자별 지출 내역 (모바일 리스트)")
-    st.caption("내용이 있는 날짜와 오늘만 표시됩니다.")
-    
-    day_names = ["월", "화", "수", "목", "금", "토", "일"]
-    w_info = st.session_state.cash_data["monthly"].get(month_key, {})
-    
-    for current_date in date_list:
-        is_today = (current_date == actual_today)
-        day_fixed = f_date_map.get(current_date, [])
-        day_spent = s_date_map.get(current_date, [])
-        
-        has_withdrawal = w_info.get("withdrawal", 0) > 0 and dt.date.fromisoformat(w_info.get("withdrawal_date")) == current_date
-        
-        if not day_fixed and not day_spent and not is_today and not has_withdrawal:
-            continue 
-            
-        f_sum = sum(e.amount for e in day_fixed)
-        s_sum = sum(a for _, a, _ in day_spent)
-        
-        html_lines = []
-        card_class = "mobile-card mobile-today" if is_today else "mobile-card"
-        border_color = "#e74c3c" if day_fixed else "#3498db"
-        
-        html_lines.append(f"<div class='{card_class}' style='border-left: 6px solid {border_color};'>")
-        
-        today_badge = "<span style='color:#2ecc71; font-weight:bold; font-size:14px;'>[오늘]</span>" if is_today else ""
-        html_lines.append(f"<div style='display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px;'>")
-        html_lines.append(f"  <b style='font-size:18px; color:#333;'>{current_date.month}/{current_date.day} ({day_names[current_date.weekday()]}) {today_badge}</b>")
-        if f_sum > 0 or s_sum > 0:
-            html_lines.append(f"  <span style='font-size:14px; color:#555; font-weight:bold;'>일일 합계: {f_sum + s_sum:,.0f}원</span>")
-        html_lines.append(f"</div>")
-        
-        if has_withdrawal:
-            html_lines.append(f"<div style='background-color:#ff4b4b; color:white; padding:6px; border-radius:5px; font-weight:bold; text-align:center; font-size:13px; margin-bottom:8px;'>💸 비상금 인출: {w_info['withdrawal']:,.0f}원</div>")
-        
-        if current_date.weekday() == 6 or current_date == budget_end:
-            weeks_grid = [([None]*budget_start.weekday() + date_list)[i:i+7] for i in range(0, len([None]*budget_start.weekday() + date_list), 7)]
-            weekly_food_base = food_budget_total / len(weeks_grid)
-            w_bal = None
-            for week_row in weeks_grid:
-                valid = [d for d in week_row if d is not None]
-                if not valid:
-                    continue
-                if (week_row[6] if (len(week_row) > 6 and week_row[6]) else valid[-1]) == current_date:
-                    ws, we = valid[0], valid[-1]
-                    w_food_spent = int(v_period_df[(v_period_df["category"] == "식비") & (v_period_df["date"].dt.date >= ws) & (v_period_df["date"].dt.date <= we)]["amount"].sum())
-                    w_food_bal = weekly_food_base - w_food_spent
-                    cum_spent_df = v_period_df[v_period_df["date"].dt.date <= we]
-                    w_bal = {
-                        "food": w_food_bal,
-                        "hh": hh_budget_total - int(cum_spent_df[cum_spent_df["category"] == "생활용품"]["amount"].sum()),
-                        "tr": tr_budget_total - int(cum_spent_df[cum_spent_df["category"] == "교통/차량"]["amount"].sum()),
-                        "other": other_budget_total - int(cum_spent_df[cum_spent_df["category"] == "기타"]["amount"].sum()),
-                        "em": em_budget_total - int(cum_spent_df[cum_spent_df["category"] == "예비비"]["amount"].sum())
-                    }
-                    break
-            
-            if w_bal:
-                def get_c(val):
-                    return "#e74c3c" if val < 0 else "#27ae60"
-                html_lines.append(f"""
-                <div style='margin-bottom:8px; padding:8px; background:#f1f9f4; border-radius:6px; font-size:13px; font-weight:bold; line-height:1.5;'>
-                    <span style='color:{get_c(w_bal['food'])};'>🍞 주간 식비: {w_bal['food']:,.0f}</span><br>
-                    <span style='color:{get_c(w_bal['hh'])};'>🧺 생활용품: {w_bal['hh']:,.0f}</span><br>
-                    <span style='color:{get_c(w_bal['tr'])};'>🚗 차량/교통: {w_bal['tr']:,.0f}</span><br>
-                    <span style='color:{get_c(w_bal['other'])};'>➕ 기타: {w_bal['other']:,.0f}</span>
-                </div>
-                <div style='padding:8px; background:#fff3cd; border-radius:6px; font-size:13px; font-weight:bold; border: 1px solid #ffeeba; margin-bottom:8px;'>
-                    <span style='color:{get_c(w_bal['em'])};'>🚨 예비비: {w_bal['em']:,.0f}</span>
-                </div>
-                """)
-
-        if day_fixed:
-            html_lines.append(f"<div style='color:#e74c3c; font-size:14px; font-weight:bold; margin-top:4px;'>📌 고정 지출: {f_sum:,.0f}원</div>")
-            for e in day_fixed:
-                html_lines.append(f"<div style='color:#c0392b; font-size:13px; margin-left: 12px; margin-top:2px;'>· {e.item} ({e.amount:,.0f}원)</div>")
-        
-        if day_spent:
-            html_lines.append(f"<div style='color:#3498db; font-size:14px; font-weight:bold; margin-top:8px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
-            for c, a, m in day_spent:
-                m_txt = m if m else c
-                html_lines.append(f"<div style='color:#2980b9; font-size:13px; margin-left: 12px; margin-top:2px;'>· {m_txt} ({a:,.0f}원)</div>")
-        
-        if not day_fixed and not day_spent and not has_withdrawal and not (current_date.weekday() == 6 or current_date == budget_end):
-            html_lines.append("<div style='color:#aaa; font-size:13px; text-align:center; padding: 10px 0;'>지출 내역 없음</div>")
-
-        html_lines.append("</div>")
-        st.markdown("".join(html_lines), unsafe_allow_html=True)
-
-# -----------------------------
-# 6. 상세 지출 내역 및 삭제 기능
-# -----------------------------
-st.markdown("---")
-st.subheader("📜 기간 상세 지출 내역")
-if not v_period_df.empty:
-    st.data_editor(
-        v_period_df.assign(date=v_period_df["date"].dt.date).sort_values("date"),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "amount": st.column_config.NumberColumn(format="%,d")
-        }
-    )
-    with st.expander("🗑️ 지출 항목 삭제", expanded=False):
-        to_del = st.multiselect("삭제할 항목 선택", options=list(v_period_df.index), 
-                                format_func=lambda x: f"{df.loc[x,'date'].date()} | {df.loc[x,'memo']} | {df.loc[x,'amount']:,}원")
-        if st.button("선택한 항목 삭제"):
-            st.session_state.df = st.session_state.df.drop(to_del).reset_index(drop=True)
-            st.rerun()
+    if day_spent:
+        html_lines.append(f"<div style='color:#3498db; font-size:14px; font-weight:bold; margin-top:8px;'>🛒 변동 지출: {s_sum:,.0f}원</div>")
