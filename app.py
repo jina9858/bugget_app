@@ -61,6 +61,7 @@ REF_DATE_FILE = "ref_dates.json"
 CASH_ASSETS_FILE = "cash_assets.json"
 EXPENSE_FILE = "expenses_data.json"
 BUDGET_SETTINGS_FILE = "budget_settings.json"
+SELECTED_MONTH_FILE = "selected_month.json"
 
 # -----------------------------
 # 1. 데이터 관리 로직
@@ -188,6 +189,9 @@ if "cash_data" not in st.session_state:
 if "budget_settings" not in st.session_state:
     st.session_state.budget_settings = load_json(BUDGET_SETTINGS_FILE, {})
 
+if "selected_month" not in st.session_state:
+    st.session_state.selected_month = load_json(SELECTED_MONTH_FILE, START_MONTH)
+
 if "df" not in st.session_state:
     loaded_expenses = load_json(EXPENSE_FILE, [])
     st.session_state.df = pd.DataFrame(
@@ -202,11 +206,21 @@ if "df" not in st.session_state:
 st.sidebar.header("⚙️ 예산 설정")
 st.sidebar.info(f"✨ 실제 오늘: {actual_today.strftime('%Y-%m-%d')}")
 
+month_options = list(range(START_MONTH, END_MONTH + 1))
+saved_selected_month = st.session_state.selected_month if st.session_state.selected_month in month_options else START_MONTH
+
 selected_month = st.sidebar.selectbox(
     "조회 월 선택",
-    options=list(range(START_MONTH, END_MONTH + 1)),
+    options=month_options,
+    index=month_options.index(saved_selected_month),
     format_func=lambda m: f"{m}월"
 )
+
+if selected_month != st.session_state.selected_month:
+    st.session_state.selected_month = selected_month
+    save_json(SELECTED_MONTH_FILE, selected_month)
+    st.rerun()
+
 month_key = f"{YEAR}-{selected_month:02d}"
 
 saved_val = st.session_state.ref_dates.get(month_key)
