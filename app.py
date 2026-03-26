@@ -60,6 +60,7 @@ FIXED_FILE = "fixed_events.json"
 REF_DATE_FILE = "ref_dates.json"
 CASH_ASSETS_FILE = "cash_assets.json"
 EXPENSE_FILE = "expenses_data.json"
+BUDGET_SETTINGS_FILE = "budget_settings.json"
 
 # -----------------------------
 # 1. 데이터 관리 로직
@@ -184,6 +185,18 @@ if "cash_data" not in st.session_state:
         {"total_balance": 0, "monthly": {}}
     )
 
+if "budget_settings" not in st.session_state:
+    st.session_state.budget_settings = load_json(
+        BUDGET_SETTINGS_FILE,
+        {
+            "food_budget_total": 650000,
+            "hh_budget_total": 100000,
+            "tr_budget_total": 150000,
+            "other_budget_total": 50000,
+            "em_budget_input": 200000
+        }
+    )
+
 if "df" not in st.session_state:
     loaded_expenses = load_json(EXPENSE_FILE, [])
     st.session_state.df = pd.DataFrame(
@@ -229,11 +242,48 @@ if budget_start.isoformat() != saved_dates.get("start") or budget_end.isoformat(
     st.rerun()
 
 st.sidebar.markdown("---")
-food_budget_total = st.sidebar.number_input("🍔 월 식비 총 예산", min_value=0, value=650000, step=10000)
-hh_budget_total = st.sidebar.number_input("🧺 월 생활용품 예산", min_value=0, value=100000, step=10000)
-tr_budget_total = st.sidebar.number_input("🚗 월 차량/교통 예산", min_value=0, value=150000, step=10000)
-other_budget_total = st.sidebar.number_input("➕ 월 기타 예산", min_value=0, value=50000, step=10000)
-em_budget_input = st.sidebar.number_input("🚨 월 예비비 기본 예산", min_value=0, value=200000, step=10000)
+food_budget_total = st.sidebar.number_input(
+    "🍔 월 식비 총 예산",
+    min_value=0,
+    value=st.session_state.budget_settings.get("food_budget_total", 650000),
+    step=10000
+)
+hh_budget_total = st.sidebar.number_input(
+    "🧺 월 생활용품 예산",
+    min_value=0,
+    value=st.session_state.budget_settings.get("hh_budget_total", 100000),
+    step=10000
+)
+tr_budget_total = st.sidebar.number_input(
+    "🚗 월 차량/교통 예산",
+    min_value=0,
+    value=st.session_state.budget_settings.get("tr_budget_total", 150000),
+    step=10000
+)
+other_budget_total = st.sidebar.number_input(
+    "➕ 월 기타 예산",
+    min_value=0,
+    value=st.session_state.budget_settings.get("other_budget_total", 50000),
+    step=10000
+)
+em_budget_input = st.sidebar.number_input(
+    "🚨 월 예비비 기본 예산",
+    min_value=0,
+    value=st.session_state.budget_settings.get("em_budget_input", 200000),
+    step=10000
+)
+
+current_budget_settings = {
+    "food_budget_total": int(food_budget_total),
+    "hh_budget_total": int(hh_budget_total),
+    "tr_budget_total": int(tr_budget_total),
+    "other_budget_total": int(other_budget_total),
+    "em_budget_input": int(em_budget_input)
+}
+
+if current_budget_settings != st.session_state.budget_settings:
+    st.session_state.budget_settings = current_budget_settings
+    save_json(BUDGET_SETTINGS_FILE, st.session_state.budget_settings)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🅿️ 현금 자산 (파킹) 관리")
@@ -361,24 +411,23 @@ total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_bu
 adequacy = total_budgetable - total_planned
 total_balance = total_budgetable - int(v_period_df["amount"].sum())
 
-# 달력 그리드 및 항목별 정산
+start_weekday = budget_start.weekday()
+full_grid = [None] * start_weekday + []
 date_list = []
 curr = budget_start
 while curr <= budget_end:
     date_list.append(curr)
     curr += dt.timedelta(days=1)
+full_grid = [None] * start_weekday + date_list
+padding = (7 - (len(full_grid) % 7)) % 7
+full_grid += [None] * padding
+weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 used_food = int(v_period_df[v_period_df["category"] == "식비"]["amount"].sum())
 used_hh = int(v_period_df[v_period_df["category"] == "생활용품"]["amount"].sum())
 used_tr = int(v_period_df[v_period_df["category"] == "교통/차량"]["amount"].sum())
 used_other = int(v_period_df[v_period_df["category"] == "기타"]["amount"].sum())
 used_em = int(v_period_df[v_period_df["category"] == "예비비"]["amount"].sum())
-
-start_weekday = budget_start.weekday()
-full_grid = [None] * start_weekday + date_list
-padding = (7 - (len(full_grid) % 7)) % 7
-full_grid += [None] * padding
-weeks = [full_grid[i:i+7] for i in range(0, len(full_grid), 7)]
 
 weekly_food_base = food_budget_total / len(weeks)
 weekly_balances = {}
