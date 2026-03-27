@@ -12,15 +12,11 @@ st.set_page_config(page_title="예산 달력", layout="wide")
 
 st.markdown("""
     <style>
-        /* [수정] 왼쪽 사이드바 너비 */
         section[data-testid="stSidebar"] {
             min-width: 350px !important;
         }
 
-        /* 모바일에서 화면 절반을 차지하는 큰 제목 텍스트 사이즈만 축소 */
         h1 { font-size: 22px !important; }
-        
-        /* 줄바꿈 방지를 위해 3개 타이틀(h3) 기본 사이즈 지정 */
         h3 { font-size: 20px !important; }
 
         @media screen and (max-width: 600px) {
@@ -118,7 +114,6 @@ def build_fixed_events(year=YEAR, start_month=START_MONTH, end_month=END_MONTH) 
             Event(dt.date(year, m, 26), "통신",     "LGU+ 인터넷",       32830),
         ]
 
-        # 메리츠 운전자보험: 매달 5일 1회 출금
         try:
             events.append(Event(dt.date(year, m, 5), "보험", "메리츠 운전자보험", 10280))
         except:
@@ -240,45 +235,69 @@ saved_budget = st.session_state.budget_settings.get(
     }
 )
 
+# 월 바뀔 때 위젯 현재값 초기화
+budget_start_key = f"budget_start_{month_key}"
+budget_end_key = f"budget_end_{month_key}"
+food_key = f"food_budget_total_{month_key}"
+hh_key = f"hh_budget_total_{month_key}"
+tr_key = f"tr_budget_total_{month_key}"
+other_key = f"other_budget_total_{month_key}"
+em_key = f"em_budget_input_{month_key}"
+
+if budget_start_key not in st.session_state:
+    st.session_state[budget_start_key] = dt.date.fromisoformat(saved_dates["start"])
+if budget_end_key not in st.session_state:
+    st.session_state[budget_end_key] = dt.date.fromisoformat(saved_dates["end"])
+if food_key not in st.session_state:
+    st.session_state[food_key] = int(saved_budget.get("food_budget_total", 650000))
+if hh_key not in st.session_state:
+    st.session_state[hh_key] = int(saved_budget.get("hh_budget_total", 100000))
+if tr_key not in st.session_state:
+    st.session_state[tr_key] = int(saved_budget.get("tr_budget_total", 150000))
+if other_key not in st.session_state:
+    st.session_state[other_key] = int(saved_budget.get("other_budget_total", 50000))
+if em_key not in st.session_state:
+    st.session_state[em_key] = int(saved_budget.get("em_budget_input", 200000))
+
 budget_start = st.sidebar.date_input(
     "📅 예산 시작일",
-    value=dt.date.fromisoformat(saved_dates["start"])
+    key=budget_start_key
 )
 budget_end = st.sidebar.date_input(
     "🏁 예산 종료일",
-    value=dt.date.fromisoformat(saved_dates["end"])
+    key=budget_end_key
 )
 
 st.sidebar.markdown("---")
 food_budget_total = st.sidebar.number_input(
     "🍔 월 식비 총 예산",
     min_value=0,
-    value=int(saved_budget.get("food_budget_total", 650000)),
-    step=10000
+    step=10000,
+    key=food_key
 )
 hh_budget_total = st.sidebar.number_input(
     "🧺 월 생활용품 예산",
     min_value=0,
-    value=int(saved_budget.get("hh_budget_total", 100000)),
-    step=10000
+    step=10000,
+    key=hh_key
 )
 tr_budget_total = st.sidebar.number_input(
     "🚗 월 차량/교통 예산",
     min_value=0,
-    value=int(saved_budget.get("tr_budget_total", 150000)),
-    step=10000
+    step=10000,
+    key=tr_key
 )
 other_budget_total = st.sidebar.number_input(
     "➕ 월 기타 예산",
     min_value=0,
-    value=int(saved_budget.get("other_budget_total", 50000)),
-    step=10000
+    step=10000,
+    key=other_key
 )
 em_budget_input = st.sidebar.number_input(
     "🚨 월 예비비 기본 예산",
     min_value=0,
-    value=int(saved_budget.get("em_budget_input", 200000)),
-    step=10000
+    step=10000,
+    key=em_key
 )
 
 if st.sidebar.button("예산 설정 저장"):
@@ -296,9 +315,6 @@ if st.sidebar.button("예산 설정 저장"):
         "em_budget_input": int(em_budget_input)
     }
     save_json(BUDGET_SETTINGS_FILE, st.session_state.budget_settings)
-
-    st.session_state.budget_start = budget_start
-    st.session_state.budget_end = budget_end
 
     st.sidebar.success("예산 설정 저장 완료")
     st.rerun()
@@ -421,8 +437,9 @@ rem_fixed_sum = sum(e.amount for e in period_fixed_events if e.date > actual_tod
 total_fixed = paid_fixed_sum + rem_fixed_sum
 v_period_df = df[(df["date"].dt.date >= budget_start) & (df["date"].dt.date <= budget_end)]
 
-total_budgetable = cur_inc - monthly_savings - total_fixed + monthly_carry_over + withdrawal
+# 메인 계산은 현재 사이드바 값 그대로 사용
 initial_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_input
+total_budgetable = cur_inc - monthly_savings - total_fixed + monthly_carry_over + withdrawal
 surplus = total_budgetable - initial_planned
 em_budget_total = em_budget_input + (surplus if surplus > 0 else 0)
 total_planned = food_budget_total + hh_budget_total + tr_budget_total + other_budget_total + em_budget_total
