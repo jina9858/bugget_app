@@ -512,7 +512,8 @@ b1.metric("🍔 식비 예산", f"{food_budget_total:,.0f}원", delta=f"{total_f
 b2.metric("🧺 생활용품", f"{hh_budget_total:,.0f}원", delta=f"{(hh_budget_total - used_hh):,.0f}원 (정산)")
 b3.metric("🚗 차량/교통", f"{tr_budget_total:,.0f}원", delta=f"{(tr_budget_total - used_tr):,.0f}원 (정산)")
 b4.metric("➕ 기타 예산", f"{other_budget_total:,.0f}원", delta=f"{(other_budget_total - used_other):,.0f}원 (정산)")
-b5.metric("🚨 예비비 예산", f"{em_budget_total:,.0f}원", delta=f"{(em_budget_total - used_em):,.0f}원 (정산)")
+extra_em = em_budget_total - em_budget_input
+b5.metric("🚨 예비비", f"{em_budget_input:,.0f} + {extra_em:,.0f} = {em_budget_total:,.0f}원", delta=f"{(em_budget_total - used_em):,.0f}원 (정산)")
 b6.metric("✅ 현재 남은 총 예산", f"{total_remaining_budget:,.0f}원", delta="정산 총합", delta_color="off")
 
 # -----------------------------
